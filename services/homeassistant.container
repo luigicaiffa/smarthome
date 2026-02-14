@@ -1,0 +1,25 @@
+[Unit]
+Description=Home Assistant Container
+After=network-online.target
+
+[Container]
+Image=ghcr.io/home-assistant/home-assistant:stable
+ContainerName=homeassistant
+AutoUpdate=registry
+
+# Network Host è cruciale per Discovery, mDNS e Google Cast
+Network=host
+
+# Variabile per il fuso orario (Sostituisce il mount di /etc/localtime)
+Environment=TZ=Europe/Rome
+
+# Volumi
+# Mappiamo la configurazione nella home dell'utente
+Volume=%h/homeassistant/config:/config:Z
+
+# Se hai chiavette USB (es. Zigbee), scommenta e adatta le righe sotto:
+# AddDevice=/dev/ttyUSB0:/dev/ttyUSB0
+# SecurityLabelType=zvis_t
+
+[Install]
+WantedBy=default.target

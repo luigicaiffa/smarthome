@@ -1,0 +1,51 @@
+# --- SISTEMA OPERATIVO & IDE ---
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+
+# --- FEDORA COREOS (INFRASTRUCTURE) ---
+# Ignoriamo i file Ignition generati (vanno rigenerati dal .bu)
+*.ign
+# Ignoriamo eventuali backup dei file di configurazione
+*.bu.bak
+
+# --- HOME ASSISTANT (SICUREZZA & DATABASE) ---
+
+# 1. SEGRETI (CRUCIALE!)
+# Non caricare MAI le password. Usa un file secrets.yaml.example se vuoi.
+**/secrets.yaml
+**/secrets.yaml.bak
+
+# 2. DATABASE & LOG
+# Il DB cambia continuamente ed è binario. Non va su Git.
+*.db
+*.db-wal
+*.db-shm
+# Log di sistema
+*.log
+
+# 3. CARTELLE INTERNE DI HA
+# Contiene token di sessione e dati sensibili. 
+# Se vuoi fare backup di questa cartella, usa i backup di HA, non Git.
+**/.storage/
+
+# Cache e file temporanei
+**/tts/
+**/backups/
+**/deps/
+**/__pycache__/
+
+# 4. CARTELLE CUSTOM (Opzionale)
+# Se usi HACS, decidi tu. Di solito non si versionano i componenti scaricati
+# ma solo la configurazione. Scommenta se vuoi ignorarli.
+# **/custom_components/
+# **/themes/
+# **/www/
+
+# --- QUADLET / SYSTEMD ---
+# Ignoriamo file temporanei di systemd se presenti
+*.service
+# Ma manteniamo i nostri file .container (Quadlet)
+!*.container
