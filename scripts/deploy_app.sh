@@ -51,6 +51,30 @@ systemctl --user restart caddy
 systemctl --user restart duckdns
 systemctl --user restart homeassistant
 
+# 5.1 Auto-Installazione HACS (Se mancante)
+echo "🔍 Controllo presenza HACS..."
+
+# Definiamo dove dovrebbe essere HACS
+HACS_DIR="$HA_DIR/config/custom_components/hacs"
+
+# Attendiamo che HA sia partito (diamo 10 secondi per sicurezza)
+sleep 10
+
+if [ ! -d "$HACS_DIR" ]; then
+    echo "⚠️  HACS non trovato. Avvio installazione automatica..."
+    
+    # Eseguiamo l'installazione dentro il container
+    if podman exec -it homeassistant bash -c "wget -O - https://get.hacs.xyz | bash"; then
+        echo "✅ HACS installato con successo!"
+        echo "♻️  Riavvio Home Assistant per attivarlo..."
+        systemctl --user restart homeassistant
+    else
+        echo "❌ Errore durante l'installazione di HACS."
+    fi
+else
+    echo "✅ HACS è già presente."
+fi
+
 # 6. Check Status
 echo ""
 echo "📊 Stato dei servizi:"
