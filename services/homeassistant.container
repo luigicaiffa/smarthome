@@ -7,11 +7,11 @@ Image=ghcr.io/home-assistant/home-assistant:stable
 ContainerName=homeassistant
 AutoUpdate=registry
 
+# Carica tutte le variabili (TZ compresa) dal file segreto
+EnvironmentFile=%h/homeassistant/secrets.env
+
 # Network Host è cruciale per Discovery, mDNS e Google Cast
 Network=host
-
-# Variabile per il fuso orario (Sostituisce il mount di /etc/localtime)
-Environment=TZ=Europe/Rome
 
 # Volumi
 # Mappiamo la configurazione nella home dell'utente

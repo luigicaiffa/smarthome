@@ -1,42 +1,64 @@
 #!/bin/bash
 
-# Definizioni
-SERVICE_NAME="homeassistant"
-CONTAINER_FILE="services/${SERVICE_NAME}.container"
-SYSTEMD_DIR="$HOME/.config/containers/systemd"
-CONFIG_DIR="$HOME/homeassistant/config"
+# Interrompe se errori
+set -e
 
-# 1. Verifica di NON essere root (Sarebbe un errore fatale per Rootless Podman)
-if [ "$EUID" -eq 0 ]; then
-  echo "❌ ERRORE: Non eseguire questo script come root (sudo)!"
-  echo "   Eseguilo come utente normale: ./deploy_app.sh"
-  exit 1
+echo "🚀 Inizio Deploy dell'infrastruttura..."
+
+# Definizioni
+CONFIG_DIR="$HOME/.config/containers/systemd"
+HA_DIR="$HOME/homeassistant"
+SERVICES_SRC="$HOME/services"
+
+# 1. Struttura Directory
+echo "📂 Creazione struttura directory..."
+mkdir -p "$CONFIG_DIR"
+mkdir -p "$HA_DIR"
+mkdir -p "$HA_DIR/config"
+mkdir -p "$HA_DIR/caddy/data"
+mkdir -p "$HA_DIR/caddy/config"
+
+# 2. Controllo Caddyfile
+# Ora controlliamo dove deve essere davvero (in HA_DIR)
+if [ ! -f "$HA_DIR/Caddyfile" ]; then
+    echo "⚠️  ATTENZIONE: Caddyfile non trovato in $HA_DIR!"
+    echo "    Caddy potrebbe non partire correttamente."
+else
+    echo "✅ Caddyfile rilevato in posizione corretta."
 fi
 
-echo "🚀 Inizio Deploy di $SERVICE_NAME..."
+# 3. Installazione Servizi
+echo "🐳 Installazione definizioni Container..."
+if [ -d "$SERVICES_SRC" ]; then
+    cp "$SERVICES_SRC"/*.container "$CONFIG_DIR/"
+    COUNT=$(ls "$SERVICES_SRC"/*.container | wc -l)
+    echo "   Copiati $COUNT servizi."
+else
+    echo "❌ ERRORE: Cartella $SERVICES_SRC non trovata!"
+    exit 1
+fi
 
-# 2. Creazione cartelle (Se non esistono già grazie a Ignition)
-# Il flag -p non dà errore se esistono già.
-mkdir -p "$SYSTEMD_DIR"
-mkdir -p "$CONFIG_DIR"
-
-# 3. Copia del file Quadlet
-echo "📂 Copia definizioni Systemd..."
-cp "$CONTAINER_FILE" "$SYSTEMD_DIR/"
-
-# 4. Reload di Systemd
+# 4. Reload Systemd
 echo "🔄 Ricaricamento Systemd User..."
 systemctl --user daemon-reload
 
-# 5. Restart del servizio
-echo "▶️  Avvio/Restart Container..."
-systemctl --user restart "$SERVICE_NAME"
+# 5. Riavvio Servizi
+# Riavviamo usando i nomi dei FILE .container (senza estensione)
+# Es. caddy.container -> caddy.service
+# Es. duckdns.container -> duckdns.service
+echo "▶️  Riavvio servizi..."
+systemctl --user restart caddy
+systemctl --user restart duckdns
+systemctl --user restart homeassistant
 
-# 6. Verifica stato
-if systemctl --user is-active --quiet "$SERVICE_NAME"; then
-    echo "✅ Successo! Il servizio è attivo."
-    echo "   Log: journalctl --user -f -u $SERVICE_NAME"
-else
-    echo "⚠️  Attenzione: Il servizio non sembra attivo."
-    echo "   Controlla: systemctl --user status $SERVICE_NAME"
-fi
+# 6. Check Status
+echo ""
+echo "📊 Stato dei servizi:"
+echo "---------------------"
+systemctl --user status caddy --no-pager | grep "Active:" || echo "❌ Caddy non attivo"
+systemctl --user status duckdns --no-pager | grep "Active:" || echo "❌ DuckDNS non attivo"
+systemctl --user status homeassistant --no-pager | grep "Active:" || echo "❌ Home Assistant non attivo"
+
+echo ""
+echo "✅ Deploy completato."
+echo "   Per i log completi: journalctl --user -f"

@@ -17,6 +17,9 @@ Thumbs.db
 # Non caricare MAI le password. Usa un file secrets.yaml.example se vuoi.
 **/secrets.yaml
 **/secrets.yaml.bak
+secrets.env
+*.key
+*.pem
 
 # 2. DATABASE & LOG
 # Il DB cambia continuamente ed è binario. Non va su Git.
@@ -49,3 +52,16 @@ Thumbs.db
 *.service
 # Ma manteniamo i nostri file .container (Quadlet)
 !*.container
+
+# --- BUILD ARTIFACTS ---
+# Ignora tutto il contenuto delle cartelle di lavoro
+build/
+cache/
+
+# Ignora eventuali file ISO rimasti nella root per errore
+*.iso
+
+# --- BACKUPS ---
+backups/
+*.tar.gz
+*.bak

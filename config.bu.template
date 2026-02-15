@@ -17,17 +17,46 @@ storage:
       mode: 0644
       contents:
         inline: ""
+    
+    # Permette ai container rootless di usare porte >= 80 (Caddy serve la 80 e 443)
+    - path: /etc/sysctl.d/99-unprivileged-ports.conf
+      mode: 0644
+      contents:
+        inline: "net.ipv4.ip_unprivileged_port_start=80"
 
   directories:
-    # Cartella Configurazione Home Assistant
+    # 1. Cartella principale Home Assistant
+    - path: /var/home/core/homeassistant
+      mode: 0755
+      user:
+        name: core
+      group:
+        name: core
+
     - path: /var/home/core/homeassistant/config
       mode: 0755
       user:
         name: core
       group:
         name: core
-    
-    # Cartella Systemd per Quadlet (Così è pronta subito)
+        
+    # 2. Cartella .config (Il genitore che dava errore)
+    - path: /var/home/core/.config
+      mode: 0755
+      user:
+        name: core
+      group:
+        name: core
+
+    # 3. Cartella containers (Intermedia)
+    - path: /var/home/core/.config/containers
+      mode: 0755
+      user:
+        name: core
+      group:
+        name: core
+
+    # 4. Cartella systemd (Finale)
     - path: /var/home/core/.config/containers/systemd
       mode: 0755
       user:
