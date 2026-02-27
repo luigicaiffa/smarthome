@@ -1,11 +1,11 @@
 # 🏠 Smart Home Infrastructure (Fedora CoreOS + Podman)
 
 Benvenuto nel repository **Infrastructure-as-Code (IaC)** per la tua Smart Home.
-Questo progetto automatizza il deployment di **Home Assistant**, **Caddy** (Reverse Proxy con HTTPS automatico) e **DuckDNS** su un sistema operativo robusto e minimale: **Fedora CoreOS**.
+Questo progetto automatizza il deployment di **Home Assistant** e **Cloudflare Tunnel** (Accesso Remoto Sicuro) su un sistema operativo robusto e minimale: **Fedora CoreOS**.
 
 ### ✨ Filosofia del Progetto
 *   🛡️ **Immutabile:** Sistema operativo gestito via `ostree`, aggiornamenti atomici.
-*   🔒 **Rootless:** I container girano senza privilegi di root (Podman Quadlet) per la massima sicurezza.
+*   🔐 **Sicurezza Ibrida:** Cloudflare Tunnel gira in modalità **Rootless** (utente) per sicurezza, mentre Home Assistant gira in modalità **Rootful** (sistema) per garantire l'accesso diretto all'hardware (Bluetooth/USB).
 *   🤖 **Zero-Touch:** Installazione tramite ISO autoconfigurante. Inserisci la chiavetta e fa tutto da solo.
 *   🔄 **Smart Restore:** Ripristino intelligente che unisce i dati storici con la configurazione più recente.
 
@@ -19,9 +19,8 @@ Questo progetto automatizza il deployment di **Home Assistant**, **Caddy** (Reve
 ├── 📂 services/             # ⚙️ Definizioni dei Container (Systemd/Quadlet .container)
 ├── 📂 scripts/              # 🛠️ Script di automazione (Build, Deploy, Backup)
 ├── 📄 config.bu.template    # 📄 Template Butane per la configurazione dell'OS
-├── 📄 Caddyfile             # 🌐 Configurazione Reverse Proxy
 ├── 📄 secrets.env.template  # 📄 Template per le variabili d'ambiente
-├── � secrets.env           # 🔑 Variabili sensibili (NON committare su Git!)
+├── 📄 secrets.env           # 🔑 Variabili sensibili (NON committare su Git!)
 └── 📘 README.md             # 📖 Questo file
 ```
 
@@ -86,14 +85,14 @@ Questa procedura crea una chiavetta USB che formatta, installa e configura il se
 Regola d'oro: Non modificare mai i file direttamente sul server. Modifica sul PC, poi fai "Push".
 
 ### Applicare Modifiche
-Se hai modificato un .container, il Caddyfile o secrets.env:
+Se hai modificato un file `.container` o `secrets.env`:
 ```bash
 ./scripts/push_update.sh
 ```
 
 Questo script:
-1.  Copia le configurazioni aggiornate (services/, scripts/, Caddyfile) sul server.
-2.  Aggiorna il file dei segreti.
+1.  Copia le configurazioni aggiornate (`services/`, `scripts/`) sul server.
+2.  Aggiorna il file dei segreti (`secrets.env`).
 3.  Ricarica Systemd e riavvia i servizi necessari automaticamente.
 
 ============================================================
@@ -101,12 +100,12 @@ Questo script:
 ## 4. Backup & Disaster Recovery
 
 ### Eseguire Backup
-Salva database, configurazioni storage e certificati SSL dal server al tuo PC.
+Salva il database e le configurazioni di Home Assistant dal server al tuo PC.
 ```bash
 ./scripts/remote_backup.sh
 ```
 
-Il file .tar.gz verrà salvato nella cartella locale backups/.
+Il file `.tar.gz` verrà salvato nella cartella locale `backups/`.
 
 ### Ripristinare (Restore)
 Da usare dopo una reinstallazione o su un nuovo hardware.
@@ -114,44 +113,60 @@ Da usare dopo una reinstallazione o su un nuovo hardware.
 ./scripts/remote_restore.sh
 ```
 
-Logica "Smart Restore":
-1.  Carica ed estrae i DATI dal backup (Database, Storico, Certificati).
-2.  Sovrascrive la CONFIGURAZIONE (Caddyfile, Secrets, Services) prendendola dal tuo PC attuale.
-    Questo evita di ripristinare configurazioni obsolete che potrebbero rompere il sistema.
+**Logica "Smart Restore"**:
+1.  **Carica i DATI dal backup**: Database e file persistenti di Home Assistant vengono ripristinati.
+2.  **Sovrascrive la CONFIGURAZIONE**: I file dei servizi (`.container`) e i segreti (`secrets.env`) vengono presi dal tuo PC.
+    Questo approccio garantisce di ripartire con i dati storici ma con la configurazione più recente e sicura del repository.
 
 ============================================================
 
 ## 5. Accesso Esterno & Troubleshooting
 
 ### URL di Accesso
-* Esterno (HTTPS): https://tuosottodominio.duckdns.org
-* Locale (HTTP): http://192.168.1.100:8123
+*   **Esterno (HTTPS):** `https://<tuo-hostname-cloudflare>` (configurato nel file `secrets.env`)
+*   **Locale (HTTP):** `http://192.168.1.100:8123`
 
 ### Problemi Comuni
 
-#### Errore SSL / Sito non raggiungibile
-1.  Verifica che Caddy abbia preso il certificato:
-    ssh fcos-ha "podman logs caddy" | grep "certificate obtained"
+#### Tunnel Cloudflare non raggiungibile
+Cloudflare Tunnel non richiede IP pubblico statico né apertura di porte sul router. I problemi sono quasi sempre legati al servizio `cloudflared` sul server.
 
-2.  Se Caddy è OK ma non accedi, verifica di avere un IP Pubblico Reale.
-    * Confronta l'IP WAN del modem con quello su mioip.it.
-    * Se diversi -> Sei sotto CGNAT. Chiama il provider (es. TIM) per sbloccare l'IP pubblico.
+1.  **Verifica lo stato del servizio:**
+    ```bash
+    ssh fcos-ha "systemctl --user status cloudflared"
+    ```
+    Se non è `active (running)`, prova a riavviarlo:
+    ```bash
+    ssh fcos-ha "systemctl --user restart cloudflared"
+    ```
 
-#### Comandi Utili sul Server
+2.  **Controlla i log in tempo reale:**
+    ```bash
+    ssh fcos-ha "journalctl --user -f -u cloudflared"
+    ```
+    Cerca messaggi di errore relativi alla connessione con i server di Cloudflare o al token di autenticazione.
 
-# Stato dei servizi
+### Comandi Utili sul Server
+
+**Stato dei servizi:**
 ```bash
-systemctl --user status caddy homeassistant duckdns
+# Home Assistant (servizio di sistema)
+systemctl status homeassistant
+
+# Cloudflare Tunnel (servizio utente)
+systemctl --user status cloudflared
 ```
 
-# Log in tempo reale
+**Log in tempo reale:**
 ```bash
-journalctl --user -f -u homeassistant
-podman logs -f caddy
-podman logs -f duckdns-updater
+# Home Assistant
+journalctl -f -u homeassistant
+
+# Cloudflare Tunnel
+journalctl --user -f -u cloudflared
 ```
 
-# Aggiornamento manuale immagini
+**Aggiornamento manuale delle immagini container:**
 ```bash
 podman auto-update
 ```
