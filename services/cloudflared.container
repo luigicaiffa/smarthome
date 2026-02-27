@@ -1,0 +1,13 @@
+[Container]
+Image=docker.io/cloudflare/cloudflared:latest
+Exec=tunnel run
+EnvironmentFile=/var/home/core/homeassistant/secrets.env
+Network=host
+
+[Service]
+Restart=always
+TimeoutStopSec=70
+
+[Install]
+# I servizi rootless usano default.target
+WantedBy=default.target

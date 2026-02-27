@@ -1,31 +1,35 @@
 #!/bin/bash
 
-# Interrompe subito se c'è un errore (es. ssh fallisce)
+# Interrompe subito se c'è un errore
 set -e
 
 # ==========================================
-# 🚀 PUSH UPDATE TO SERVER (ROBUST)
+# 🚀 PUSH UPDATE TO SERVER (MIRROR MODE)
 # ==========================================
 
-# 1. Configurazione Percorsi (Indipendente da dove lanci lo script)
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Configurazione Server
-SERVER_HOST="fcos-ha"  # Verifica che corrisponda al tuo ~/.ssh/config
+SERVER_HOST="fcos-ha" 
 REMOTE_USER="core"
 
 echo "🚀 Inizio aggiornamento su: $SERVER_HOST"
 echo "📂 Project Root rilevata: $PROJECT_ROOT"
 
-# 2. Copia dei file
 echo ""
-echo "--- 📦 Sincronizzazione File ---"
+echo "--- 🧹 Pulizia cartelle remote ---"
+# Prepariamo il server svuotando le cartelle di destinazione
+ssh "$REMOTE_USER@$SERVER_HOST" "mkdir -p ~/services ~/scripts && rm -rf ~/services/* ~/scripts/*"
+echo "✅ Cartelle remote ripulite."
+
+echo ""
+echo "--- 📦 Sincronizzazione File (Mirror) ---"
 
 # 2.1 Services
 if [ -d "$PROJECT_ROOT/services" ]; then
     echo "✅ Invio cartella 'services'..."
-    scp -r "$PROJECT_ROOT/services/" "$REMOTE_USER@$SERVER_HOST:~/"
+    scp -r "$PROJECT_ROOT/services/"* "$REMOTE_USER@$SERVER_HOST:~/services/"
 else
     echo "⚠️  ATTENZIONE: Cartella 'services' non trovata in locale!"
 fi
@@ -33,36 +37,24 @@ fi
 # 2.2 Scripts
 if [ -d "$PROJECT_ROOT/scripts" ]; then
     echo "✅ Invio cartella 'scripts'..."
-    scp -r "$PROJECT_ROOT/scripts/" "$REMOTE_USER@$SERVER_HOST:~/"
+    scp -r "$PROJECT_ROOT/scripts/"* "$REMOTE_USER@$SERVER_HOST:~/scripts/"
 else
     echo "⚠️  ATTENZIONE: Cartella 'scripts' non trovata in locale!"
 fi
 
-# 2.3 Caddyfile
-LOCAL_CADDYFILE="$PROJECT_ROOT/Caddyfile"
-if [ -f "$LOCAL_CADDYFILE" ]; then
-    echo "✅ Invio Caddyfile..."
-    scp "$LOCAL_CADDYFILE" "$REMOTE_USER@$SERVER_HOST:~/homeassistant/Caddyfile"
-else
-    echo "❌ ERRORE: Caddyfile non trovato in: $LOCAL_CADDYFILE"
-fi
-
-# 2.4 Secrets (NUOVA SEZIONE)
+# 2.3 Secrets
 LOCAL_SECRETS="$PROJECT_ROOT/secrets.env"
 if [ -f "$LOCAL_SECRETS" ]; then
     echo "✅ Invio secrets.env..."
-    # Lo copiamo nella destinazione finale dove il deploy se lo aspetta
+    ssh "$REMOTE_USER@$SERVER_HOST" "mkdir -p ~/homeassistant"
     scp "$LOCAL_SECRETS" "$REMOTE_USER@$SERVER_HOST:~/homeassistant/secrets.env"
 else
     echo "⚠️  ATTENZIONE: secrets.env non trovato in locale ($LOCAL_SECRETS)."
-    echo "    Se il server non lo ha già, il deploy fallirà."
 fi
 
-# 3. Deploy
 echo ""
 echo "--- ⚙️  Esecuzione Deploy Remoto ---"
-# Eseguiamo il deploy. Nota: deploy_app.sh ricaricherà systemd e riavvierà i servizi necessari.
-ssh "$REMOTE_USER@$SERVER_HOST" "chmod +x scripts/deploy_app.sh && ./scripts/deploy_app.sh"
+ssh "$REMOTE_USER@$SERVER_HOST" "chmod +x ~/scripts/deploy_app.sh && ~/scripts/deploy_app.sh"
 
 echo ""
 echo "✅ Aggiornamento completato con successo!"
