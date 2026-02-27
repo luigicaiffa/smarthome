@@ -28,19 +28,22 @@ fi
 
 # 3. Stop Servizi & Compressione
 echo "⏸️  Arresto servizi e compressione..."
+# Rimosso il flag -t per evitare il warning del pseudo-terminal
 ssh "$REMOTE_USER@$SERVER_HOST" "bash -s" <<EOF
-    # Stop solo di HA per consistenza DB (Caddy può restare attivo se vuoi, ma meglio spegnere)
-    systemctl --user stop homeassistant
-    systemctl --user stop caddy
+    # Stop di HA (servizio di sistema) e Caddy (servizio utente)
+    sudo systemctl stop homeassistant.service
+    systemctl --user stop caddy.service || true
     
-    # Compressione
-    # Usiamo tar ignorando eventuali warning di "file changed as we read it"
-    tar -czf "$BACKUP_FILENAME" "$REMOTE_DIR" || [ \$? -eq 1 ]
+    # Compressione (eseguita con SUDO per leggere i file creati dal container rootful)
+    sudo tar -czf "$BACKUP_FILENAME" "$REMOTE_DIR" || [ \$? -eq 1 ]
+
+    # Cambia il proprietario dell'archivio a "core" per permettere il download
+    sudo chown $REMOTE_USER:$REMOTE_USER "$BACKUP_FILENAME"
 
     # Riavvio
     echo "▶️  Riavvio servizi..."
-    systemctl --user start caddy
-    systemctl --user start homeassistant
+    systemctl --user start caddy.service || true
+    sudo systemctl start homeassistant.service
 EOF
 
 # 4. Download

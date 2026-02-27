@@ -1,25 +1,30 @@
 [Unit]
-Description=Home Assistant Container
-After=network-online.target
+Description=Home Assistant (Rootful System Container)
+After=network-online.target bluetooth.service
+Wants=bluetooth.service
 
 [Container]
 Image=ghcr.io/home-assistant/home-assistant:stable
 ContainerName=homeassistant
 AutoUpdate=registry
 
-# Carica tutte le variabili (TZ compresa) dal file segreto
-EnvironmentFile=%h/homeassistant/secrets.env
+# Disabilita l'isolamento SELinux per comunicare con l'hardware host
+SecurityLabelDisable=true
 
-# Network Host è cruciale per Discovery, mDNS e Google Cast
+# --- NUOVI PERMESSI BLUETOOTH ATTIVO ---
+# Richiesti da HA per inviare comandi (es. lampadine SmartLife/Tuya)
+AddCapability=NET_ADMIN
+AddCapability=NET_RAW
+
+# Percorsi ASSOLUTI ai file dell'utente core
+EnvironmentFile=/var/home/core/homeassistant/secrets.env
 Network=host
 
 # Volumi
-# Mappiamo la configurazione nella home dell'utente
-Volume=%h/homeassistant/config:/config:Z
-
-# Se hai chiavette USB (es. Zigbee), scommenta e adatta le righe sotto:
-# AddDevice=/dev/ttyUSB0:/dev/ttyUSB0
-# SecurityLabelType=zvis_t
+Volume=/var/home/core/homeassistant/config:/config:Z
+Volume=/run/dbus:/run/dbus:ro
+Volume=/etc/machine-id:/etc/machine-id:ro
 
 [Install]
-WantedBy=default.target
+# I servizi di sistema usano multi-user.target (non default.target)
+WantedBy=multi-user.target

@@ -49,7 +49,7 @@ secrets.env
 
 # --- QUADLET / SYSTEMD ---
 # Ignoriamo file temporanei di systemd se presenti
-*.service
+!*.service
 # Ma manteniamo i nostri file .container (Quadlet)
 !*.container
 

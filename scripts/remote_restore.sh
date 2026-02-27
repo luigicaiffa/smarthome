@@ -46,20 +46,20 @@ scp "$BACKUP_FILE" "$REMOTE_USER@$SERVER_HOST:~/$FILENAME"
 # 4. Estrazione Dati (Via SSH)
 echo "📦 Estrazione archivio e pulizia..."
 ssh "$REMOTE_USER@$SERVER_HOST" "bash -s" <<EOF
-    # Stop servizi
-    systemctl --user stop homeassistant 2>/dev/null || true
-    systemctl --user stop caddy 2>/dev/null || true
+    # Stop servizi (HA è di sistema, Caddy è utente)
+    sudo systemctl stop homeassistant.service 2>/dev/null || true
+    systemctl --user stop caddy.service 2>/dev/null || true
     
-    # Rimuovi vecchia cartella homeassistant
-    rm -rf homeassistant/
+    # Rimuovi vecchia cartella (SUDO necessario per i file creati dal container rootful)
+    sudo rm -rf homeassistant/
 
-    # Estrai il backup
+    # Estrai il backup come utente 'core' per normalizzare i permessi
     tar -xzf "$FILENAME"
     rm "$FILENAME"
     
-    # Fix permessi (se necessario)
+    # Fix permessi SELinux (se necessario)
     if command -v restorecon &> /dev/null; then
-        restorecon -R homeassistant/
+        sudo restorecon -R homeassistant/
     fi
 EOF
 

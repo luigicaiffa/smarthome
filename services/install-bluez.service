@@ -1,0 +1,17 @@
+[Unit]
+Description=Installa pacchetto BlueZ e Firmware per supporto Bluetooth
+Wants=network-online.target
+After=network-online.target
+Before=zincati.service
+ConditionFirstBoot=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Aggiunto realtek-firmware per i driver Realtek/TP-Link
+ExecStart=/usr/bin/rpm-ostree install -y --allow-inactive bluez realtek-firmware
+# Riavvia automaticamente per applicare il nuovo layer
+ExecStartPost=/usr/bin/systemctl reboot
+
+[Install]
+WantedBy=multi-user.target

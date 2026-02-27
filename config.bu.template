@@ -11,21 +11,34 @@ passwd:
 
 storage:
   files:
-    # TRUCCO PRO: Abilita il Linger creando questo file vuoto.
-    # Così i container partono al boot senza che tu debba fare login.
+    # Abilita il Linger (lasciato per compatibilità se in futuro aggiungerai container rootless)
     - path: /var/lib/systemd/linger/core
       mode: 0644
       contents:
         inline: ""
     
-    # Permette ai container rootless di usare porte >= 80 (Caddy serve la 80 e 443)
+    # Permette ai container rootless di usare porte >= 80
     - path: /etc/sysctl.d/99-unprivileged-ports.conf
       mode: 0644
       contents:
         inline: "net.ipv4.ip_unprivileged_port_start=80"
 
+    # --- INIEZIONE DEL SERVIZIO BLUEZ DA GIT ---
+    - path: /etc/systemd/system/install-bluez.service
+      mode: 0644
+      contents:
+        local: services/install-bluez.service
+
+    # --- INIEZIONE DEL QUADLET ROOTFUL DA GIT ---
+    - path: /etc/containers/systemd/homeassistant.container
+      mode: 0644
+      contents:
+        local: services/homeassistant.container
+
   directories:
-    # 1. Cartella principale Home Assistant
+    # Cartella principale Home Assistant e Configurazione
+    # Manteniamo la proprietà all'utente core in modo che tu possa
+    # modificare i file yaml comodamente via SSH senza usare sudo
     - path: /var/home/core/homeassistant
       mode: 0755
       user:
@@ -39,33 +52,16 @@ storage:
         name: core
       group:
         name: core
-        
-    # 2. Cartella .config (Il genitore che dava errore)
-    - path: /var/home/core/.config
-      mode: 0755
-      user:
-        name: core
-      group:
-        name: core
-
-    # 3. Cartella containers (Intermedia)
-    - path: /var/home/core/.config/containers
-      mode: 0755
-      user:
-        name: core
-      group:
-        name: core
-
-    # 4. Cartella systemd (Finale)
-    - path: /var/home/core/.config/containers/systemd
-      mode: 0755
-      user:
-        name: core
-      group:
-        name: core
 
 systemd:
   units:
     # Zincati è già attivo di default, ma lasciarlo esplicito non fa male.
     - name: zincati.service
+      enabled: true
+
+    - name: bluetooth.service
+      enabled: true
+
+    # Abilitiamo il servizio che installa i driver al primo avvio
+    - name: install-bluez.service
       enabled: true
