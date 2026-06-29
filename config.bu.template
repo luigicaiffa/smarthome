@@ -24,9 +24,26 @@ storage:
         name: core
       group:
         name: core
-    # Cartella per i segreti di Cloudflare
-    - path: /etc/cloudflared
-      mode: 0700
+    # Catena directory per i Quadlet ROOTLESS (utente core).
+    # Necessaria affinche' cloudflared parta come servizio utente al boot.
+    - path: /var/home/core/.config
+      mode: 0755
+      user:
+        name: core
+      group:
+        name: core
+    - path: /var/home/core/.config/containers
+      mode: 0755
+      user:
+        name: core
+      group:
+        name: core
+    - path: /var/home/core/.config/containers/systemd
+      mode: 0755
+      user:
+        name: core
+      group:
+        name: core
 
   files:
     # Abilita il Linger
@@ -41,13 +58,20 @@ storage:
       contents:
         inline: "net.ipv4.ip_unprivileged_port_start=80"
 
-    # --- FILE AMBIENTE PER IL TOKEN CLOUDFLARE ---
-    # Sostituisci il valore con il token reale fornito dalla dashboard
-    - path: /etc/cloudflared/tunnel.env
+    # --- SEGRETI CONDIVISI (Cloudflare + Home Assistant) ---
+    # Letto sia da cloudflared (rootless, utente core) sia da homeassistant
+    # (rootful, root): entrambi puntano qui via EnvironmentFile.
+    # Placeholder iniziale: verra' sovrascritto da push_update.sh con i valori reali.
+    - path: /var/home/core/homeassistant/secrets.env
       mode: 0600
+      user:
+        name: core
+      group:
+        name: core
       contents:
         inline: |
           TUNNEL_TOKEN=inserisci_qui_il_tuo_token_cloudflare_reale
+          TZ=Europe/Rome
 
     # --- INIEZIONE DEI SERVIZI DA GIT ---
     - path: /etc/systemd/system/install-bluez.service
@@ -60,8 +84,15 @@ storage:
       contents:
         local: services/homeassistant.container
 
-    - path: /etc/containers/systemd/cloudflared.container
+    # cloudflared e' ROOTLESS: va nella cartella Quadlet dell'utente core,
+    # non in /etc/containers/systemd (che e' per i servizi di sistema/root).
+    # Con il linger attivo, l'istanza systemd di 'core' parte al boot e lo avvia.
+    - path: /var/home/core/.config/containers/systemd/cloudflared.container
       mode: 0644
+      user:
+        name: core
+      group:
+        name: core
       contents:
         local: services/cloudflared.container
 

@@ -58,10 +58,15 @@ echo "⚙️  Generazione file Ignition in: $OUTPUT_FILE"
 
 # --- 5. ESECUZIONE (BUTANE) ---
 # Sostituzione placeholder + Conversione Butane
-# Usiamo l'immagine Docker ufficiale di Butane per non dover installare tool locali
+# Usiamo l'immagine Docker ufficiale di Butane per non dover installare tool locali.
+# IMPORTANTE: i riferimenti "local:" nel template (services/*.container, ecc.)
+# richiedono che Butane veda i file. Montiamo la project root in /files e la
+# passiamo con -d, altrimenti la conversione fallisce ("must be specified with -d").
 sed "s|%%SSH_PUB_KEY%%|$SSH_KEY_CONTENT|g" "$TEMPLATE_FILE" | \
-$ENGINE run $ARGS --interactive --rm quay.io/coreos/butane:release \
-       --pretty --strict > "$OUTPUT_FILE"
+$ENGINE run $ARGS --interactive --rm \
+       --volume "$PROJECT_ROOT":/files:ro \
+       quay.io/coreos/butane:release \
+       --pretty --strict --files-dir /files > "$OUTPUT_FILE"
 
 # Verifica risultato (ridondante con set -e, ma utile per feedback visivo)
 if [ -f "$OUTPUT_FILE" ]; then

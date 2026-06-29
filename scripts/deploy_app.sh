@@ -17,6 +17,24 @@ mkdir -p "$USER_CONFIG_DIR"
 sudo mkdir -p "$SYS_CONFIG_DIR"
 mkdir -p "$HA_DIR/config"
 
+# 1.1 Linger: indispensabile perche' i servizi ROOTLESS (cloudflared)
+# partano al boot anche senza login interattivo dell'utente.
+# Idempotente: auto-ripara installazioni precedenti senza linger.
+echo "🔗 Verifica linger per l'utente '$USER'..."
+if [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != "yes" ]; then
+    echo "   -> Abilito il linger..."
+    sudo loginctl enable-linger "$USER"
+else
+    echo "   -> Linger gia' attivo."
+fi
+
+# 1.2 Pulizia: rimuove un'eventuale copia di SISTEMA di cloudflared lasciata
+# da provisioning precedenti (cloudflared deve girare SOLO rootless).
+if [ -f "$SYS_CONFIG_DIR/cloudflared.container" ]; then
+    echo "🧹 Rimuovo copia di sistema obsoleta di cloudflared.container..."
+    sudo rm -f "$SYS_CONFIG_DIR/cloudflared.container"
+fi
+
 # 2. Gestione Permessi Secrets
 if [ -f "$HA_DIR/secrets.env" ]; then
     echo "🔒 Configurazione permessi Secrets..."
