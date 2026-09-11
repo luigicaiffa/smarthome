@@ -97,7 +97,54 @@ Questo script:
 
 ============================================================
 
-## 4. Backup & Disaster Recovery
+## 4. Aggiornamento di Home Assistant
+
+Il quadlet usa il tag mobile `:stable` con `AutoUpdate=registry`, ma il timer
+`podman-auto-update.timer` è **disabilitato di proposito**: un aggiornamento non
+presidiato può rompere dashboard, card HACS e integrazioni custom senza preavviso.
+L'aggiornamento si fa quindi a mano, in modo controllato:
+
+```bash
+./scripts/update_ha.sh
+```
+
+Lo script:
+1.  Scarica l'immagine dal registry **senza fermare HA** (nessun downtime in questa fase).
+2.  Si ferma subito se sei già all'ultima versione.
+3.  Mostra `versione attuale → versione nuova` e chiede conferma.
+4.  Conserva l'immagine attuale come tag di rollback.
+5.  Esegue un backup completo in `backups/` (riusa `remote_backup.sh`).
+6.  Riavvia il container e attende che HA risponda.
+7.  Verifica versione installata ed errori nel log.
+
+Opzioni: `-y` (nessuna conferma), `--skip-backup`, `--rollback`.
+
+Impostando `HA_TOKEN` (token di accesso a lunga vita) le verifiche finali includono
+anche lo stato `RUNNING` e `check_config`:
+```bash
+HA_TOKEN=xxxx ./scripts/update_ha.sh
+```
+
+### Tornare indietro
+```bash
+./scripts/update_ha.sh --rollback
+```
+Ripristina l'immagine precedente e riavvia. **Attenzione**: il database viene migrato
+al primo avvio della versione nuova e la migrazione non è reversibile. Se dopo il
+rollback HA si comporta male, ripristina anche il backup con `./scripts/remote_restore.sh`.
+
+### Dopo l'aggiornamento
+-   **Svuota la cache del browser.** Il service worker continua a servire il frontend
+    vecchio finché non chiudi *tutte* le schede di HA: è cache lato client, il server
+    non può invalidarla.
+-   **Controlla le card HACS.** Le versioni recenti dei plugin possono richiedere una
+    versione di HA più nuova, e viceversa: un plugin troppo avanti rispetto al core
+    fa apparire "Errore di configurazione" su tutte le card che lo usano.
+-   Controlla *Impostazioni > Sistema > Log* e la sezione *Riparazioni*.
+
+============================================================
+
+## 5. Backup & Disaster Recovery
 
 ### Eseguire Backup
 Salva il database e le configurazioni di Home Assistant dal server al tuo PC.
@@ -120,7 +167,7 @@ Da usare dopo una reinstallazione o su un nuovo hardware.
 
 ============================================================
 
-## 5. Accesso Esterno & Troubleshooting
+## 6. Accesso Esterno & Troubleshooting
 
 ### URL di Accesso
 *   **Esterno (HTTPS):** `https://<tuo-hostname-cloudflare>` (configurato nel file `secrets.env`)
