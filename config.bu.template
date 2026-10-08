@@ -44,6 +44,42 @@ storage:
         name: core
       group:
         name: core
+    # Catena directory per le unit systemd dell'utente core
+    # (timer notturno di podman-auto-update per cloudflared).
+    - path: /var/home/core/.config/systemd
+      mode: 0755
+      user:
+        name: core
+      group:
+        name: core
+    - path: /var/home/core/.config/systemd/user
+      mode: 0755
+      user:
+        name: core
+      group:
+        name: core
+    - path: /var/home/core/.config/systemd/user/podman-auto-update.timer.d
+      mode: 0755
+      user:
+        name: core
+      group:
+        name: core
+    - path: /var/home/core/.config/systemd/user/timers.target.wants
+      mode: 0755
+      user:
+        name: core
+      group:
+        name: core
+
+  links:
+    # Equivale a 'systemctl --user enable podman-auto-update.timer':
+    # systemd.units di Ignition gestisce solo le unit di sistema.
+    - path: /var/home/core/.config/systemd/user/timers.target.wants/podman-auto-update.timer
+      target: /usr/lib/systemd/user/podman-auto-update.timer
+      user:
+        name: core
+      group:
+        name: core
 
   files:
     # Abilita il Linger
@@ -95,6 +131,16 @@ storage:
         name: core
       contents:
         local: services/cloudflared.container
+
+    # Auto-update notturno di cloudflared (timer utente, solo container rootless).
+    - path: /var/home/core/.config/systemd/user/podman-auto-update.timer.d/nightly.conf
+      mode: 0644
+      user:
+        name: core
+      group:
+        name: core
+      contents:
+        local: services/podman-auto-update-nightly.conf
 
 systemd:
   units:

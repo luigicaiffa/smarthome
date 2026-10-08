@@ -97,10 +97,44 @@ Questo script:
 
 ============================================================
 
-## 4. Aggiornamento di Home Assistant
+## 4. Aggiornamenti
+
+| Componente | Come si aggiorna |
+|---|---|
+| Fedora CoreOS (OS + pacchetti `bluez`) | Automatico, tramite **Zincati** (con riavvio) |
+| Cloudflare Tunnel (`cloudflared`) | Automatico, **ogni notte alle 04:00** (ora italiana) |
+| Home Assistant | Manuale, con `./scripts/update_ha.sh` |
+
+### Cloudflare Tunnel (automatico)
+
+`cloudflared` non ha stato né integrazioni da rompere, mentre le versioni troppo
+vecchie smettono di essere supportate da Cloudflare: conviene tenerlo sempre aggiornato.
+
+Il quadlet ha `AutoUpdate=registry` ed è abilitato il timer **utente**
+`podman-auto-update.timer`, che verifica il registry ogni notte alle 04:00 (± 15 min)
+e, se c'è una nuova immagine, la scarica e riavvia il servizio. Se il servizio non
+riparte, podman ripristina da solo l'immagine precedente. Se il server era spento
+all'ora prevista, il controllo salta alla notte successiva.
+
+Il timer utente vede solo i container rootless, quindi Home Assistant (rootful) non
+viene mai toccato. Il timer di **sistema** resta disabilitato (`deploy_app.sh` lo
+forza spento).
+
+```bash
+# Prossima esecuzione
+ssh fcos-ha "systemctl --user list-timers podman-auto-update.timer"
+# Esito delle ultime esecuzioni
+ssh fcos-ha "journalctl --user -u podman-auto-update.service"
+# Cosa verrebbe aggiornato adesso (senza applicare nulla)
+ssh fcos-ha "podman auto-update --dry-run"
+# Forzare subito l'aggiornamento
+ssh fcos-ha "systemctl --user start podman-auto-update.service"
+```
+
+### Home Assistant (manuale)
 
 Il quadlet usa il tag mobile `:stable` con `AutoUpdate=registry`, ma il timer
-`podman-auto-update.timer` è **disabilitato di proposito**: un aggiornamento non
+`podman-auto-update.timer` di sistema è **disabilitato di proposito**: un aggiornamento non
 presidiato può rompere dashboard, card HACS e integrazioni custom senza preavviso.
 L'aggiornamento si fa quindi a mano, in modo controllato:
 
@@ -215,5 +249,9 @@ journalctl --user -f -u cloudflared
 
 **Aggiornamento manuale delle immagini container:**
 ```bash
-podman auto-update
+# cloudflared (rootless): forza subito il controllo notturno
+systemctl --user start podman-auto-update.service
+
+# Home Assistant: dal PC, con backup e rollback
+./scripts/update_ha.sh
 ```

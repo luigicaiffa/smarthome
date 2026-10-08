@@ -1,5 +1,9 @@
 [Container]
 Image=docker.io/cloudflare/cloudflared:latest
+# Aggiornato in automatico ogni notte dal timer utente podman-auto-update
+# (vedi podman-auto-update-nightly.conf). Se dopo il riavvio il servizio
+# non parte, podman torna da solo all'immagine precedente.
+AutoUpdate=registry
 Exec=tunnel run
 EnvironmentFile=/var/home/core/homeassistant/secrets.env
 Network=host

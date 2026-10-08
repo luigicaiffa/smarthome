@@ -7,6 +7,7 @@ echo "🚀 Inizio Deploy dell'infrastruttura..."
 
 # Definizioni Percorsi
 USER_CONFIG_DIR="$HOME/.config/containers/systemd"
+USER_TIMER_DROPIN_DIR="$HOME/.config/systemd/user/podman-auto-update.timer.d"
 SYS_CONFIG_DIR="/etc/containers/systemd"
 HA_DIR="$HOME/homeassistant"
 SERVICES_SRC="$HOME/services"
@@ -62,10 +63,22 @@ else
     exit 1
 fi
 
+# 3.1 Orario notturno per l'auto-update dei container rootless (cloudflared)
+echo "🌙 Installazione orario notturno per podman-auto-update (utente)..."
+mkdir -p "$USER_TIMER_DROPIN_DIR"
+cp "$SERVICES_SRC/podman-auto-update-nightly.conf" "$USER_TIMER_DROPIN_DIR/nightly.conf"
+
 # 4. Reload Systemd (Utente + Sistema)
 echo "🔄 Ricaricamento Systemd..."
 systemctl --user daemon-reload
 sudo systemctl daemon-reload
+
+# 4.1 Timer di auto-update: attivo SOLO quello utente (cloudflared).
+# Quello di sistema toccherebbe Home Assistant, che si aggiorna a mano con
+# update_ha.sh: lo teniamo esplicitamente spento.
+echo "⏰ Abilitazione podman-auto-update.timer (utente)..."
+systemctl --user enable --now podman-auto-update.timer
+sudo systemctl disable --now podman-auto-update.timer 2>/dev/null || true
 
 # 5. Riavvio Servizi
 echo "▶️  Riavvio servizi..."
@@ -97,8 +110,11 @@ echo "📊 Stato dei servizi:"
 echo "---------------------"
 systemctl --user status cloudflared.service --no-pager | grep "Active:" || echo "❌ Cloudflare non attivo"
 sudo systemctl status homeassistant.service --no-pager | grep "Active:" || echo "❌ Home Assistant non attivo"
+echo -n "Prossimo auto-update cloudflared: "
+systemctl --user show podman-auto-update.timer -p NextElapseUSecRealtime --value || echo "❌ timer non attivo"
 
 echo ""
 echo "✅ Deploy completato."
 echo "   Log Cloudflare: journalctl --user -u cloudflared.service -f"
+echo "   Log auto-update: journalctl --user -u podman-auto-update.service"
 echo "   Log Home Assistant: sudo journalctl -u homeassistant.service -f"
