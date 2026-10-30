@@ -1,0 +1,23 @@
+# Strategia di aggiornamento di Fedora CoreOS (Zincati).
+# Installato in /etc/zincati/config.d/55-updates-strategy.toml
+#
+# Il default di FCOS e' 'immediate': appena esce una release Zincati la applica
+# e riavvia l'host a qualunque ora, spegnendo Home Assistant per qualche minuto
+# in pieno giorno. Con 'periodic' il download e lo staging restano liberi, ma il
+# riavvio avviene solo dentro la finestra qui sotto.
+
+[updates]
+strategy = "periodic"
+
+[updates.periodic]
+# L'host gira in UTC: senza fuso la finestra slitterebbe di un'ora tra ora
+# solare e legale.
+time_zone = "Europe/Rome"
+
+# 03:00-03:45: dopo l'ora che si ripete al ritorno dell'ora solare (02:00-03:00)
+# e prima dei lavori delle 04:00 (speedtest notturno di HA, auto-update di
+# cloudflared), cosi' il riavvio non li interrompe.
+[[updates.periodic.window]]
+days = [ "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" ]
+start_time = "03:00"
+length_minutes = 45

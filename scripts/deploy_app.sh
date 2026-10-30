@@ -68,6 +68,13 @@ echo "🌙 Installazione orario notturno per podman-auto-update (utente)..."
 mkdir -p "$USER_TIMER_DROPIN_DIR"
 cp "$SERVICES_SRC/podman-auto-update-nightly.conf" "$USER_TIMER_DROPIN_DIR/nightly.conf"
 
+# 3.2 Finestra notturna per i riavvii di Zincati (aggiornamenti dell'OS).
+# Riavviare zincati rilegge la configurazione e basta: non provoca reboot.
+echo "🌙 Installazione finestra di riavvio di Zincati..."
+sudo mkdir -p /etc/zincati/config.d
+sudo cp "$SERVICES_SRC/zincati-updates-strategy.toml" /etc/zincati/config.d/55-updates-strategy.toml
+sudo systemctl restart zincati.service
+
 # 4. Reload Systemd (Utente + Sistema)
 echo "🔄 Ricaricamento Systemd..."
 systemctl --user daemon-reload

@@ -120,6 +120,12 @@ storage:
       contents:
         local: services/homeassistant.container
 
+    # Riavvii di Zincati solo nella finestra notturna (default: immediati).
+    - path: /etc/zincati/config.d/55-updates-strategy.toml
+      mode: 0644
+      contents:
+        local: services/zincati-updates-strategy.toml
+
     # cloudflared e' ROOTLESS: va nella cartella Quadlet dell'utente core,
     # non in /etc/containers/systemd (che e' per i servizi di sistema/root).
     # Con il linger attivo, l'istanza systemd di 'core' parte al boot e lo avvia.

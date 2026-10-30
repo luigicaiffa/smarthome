@@ -25,6 +25,15 @@ Volume=/var/home/core/homeassistant/config:/config:Z
 Volume=/run/dbus:/run/dbus:ro
 Volume=/etc/machine-id:/etc/machine-id:ro
 
+# Tempo concesso ad HA per chiudersi da solo (recorder, integrazioni) prima del
+# SIGKILL. Il default di podman e' 10s, troppo poco: HA veniva sempre ucciso a
+# meta' spegnimento, sia ai riavvii sia ai reboot di Zincati.
+StopTimeout=60
+
+[Service]
+# Deve superare StopTimeout, altrimenti systemd uccide il container per primo.
+TimeoutStopSec=90
+
 [Install]
 # I servizi di sistema usano multi-user.target (non default.target)
 WantedBy=multi-user.target

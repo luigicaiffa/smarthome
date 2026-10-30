@@ -101,9 +101,24 @@ Questo script:
 
 | Componente | Come si aggiorna |
 |---|---|
-| Fedora CoreOS (OS + pacchetti `bluez`) | Automatico, tramite **Zincati** (con riavvio) |
+| Fedora CoreOS (OS + pacchetti `bluez`) | Automatico, tramite **Zincati**, con riavvio **solo tra le 03:00 e le 03:45** (ora italiana) |
 | Cloudflare Tunnel (`cloudflared`) | Automatico, **ogni notte alle 04:00** (ora italiana) |
 | Home Assistant | Manuale, con `./scripts/update_ha.sh` |
+
+### Fedora CoreOS (automatico)
+
+Zincati scarica e prepara le nuove release in qualunque momento, ma per applicarle
+deve riavviare l'host, e quindi spegnere Home Assistant per qualche minuto. Il default
+di FCOS riavvia appena l'aggiornamento è pronto, a qualunque ora: per questo
+`services/zincati-updates-strategy.toml` imposta la strategia `periodic` con una
+finestra notturna, prima dei lavori delle 04:00.
+
+```bash
+# Strategia attiva e prossima finestra
+ssh fcos-ha "journalctl -u zincati -b | grep -i strategy"
+# Aggiornamenti in attesa del riavvio
+ssh fcos-ha "rpm-ostree status"
+```
 
 ### Cloudflare Tunnel (automatico)
 
