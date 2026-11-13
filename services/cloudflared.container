@@ -1,3 +1,11 @@
+[Unit]
+# Non arrendersi mai. Al boot dopo un blackout il server riparte prima di
+# modem e router: il DNS risponde SERVFAIL e cloudflared esce subito (non
+# riprova da solo se non trova i record SRV di argotunnel.com). Con il limite
+# di default systemd, dopo una ventina di riavvii in 40 secondi, smetteva di
+# provarci per sempre e il tunnel restava giu' fino a un riavvio manuale
+StartLimitIntervalSec=0
+
 [Container]
 Image=docker.io/cloudflare/cloudflared:latest
 # Aggiornato in automatico ogni notte dal timer utente podman-auto-update
@@ -10,6 +18,9 @@ Network=host
 
 [Service]
 Restart=always
+# Un tentativo ogni 15 secondi invece di uno ogni 2: la rete impiega minuti a
+# tornare, non serve martellare e il journal resta leggibile.
+RestartSec=15
 TimeoutStopSec=70
 
 [Install]
