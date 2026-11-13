@@ -31,6 +31,20 @@ Volume=/etc/machine-id:/etc/machine-id:ro
 StopTimeout=60
 
 [Service]
+# Al boot dopo un blackout il server riparte prima del router:
+# network-online.target arriva quando il cavo non ha ancora un indirizzo e HA
+# partirebbe senza IPv4. Zeroconf, ssdp, cloud, cast e notify falliscono il
+# setup con "Errno 19 No such device" e non riprovano piu': HA resta a meta'
+# fino a un riavvio manuale (successo il 7/11, il lease e' arrivato 84 secondi
+# dopo l'avvio di HA).
+# Si aspetta la default route, cioe' il lease DHCP, e non internet: le
+# integrazioni cloud riprovano da sole quando torna il modem. Dopo 5 minuti si
+# parte comunque, meglio HA a meta' che HA spento. In condizioni normali il
+# lease c'e' gia' e il ciclo esce al primo giro.
+# "$$" e' l'escape di systemd per passare un "$" letterale alla shell.
+ExecStartPre=/bin/sh -c 'for i in $$(seq 1 150); do ip -4 route show default | grep -q . && exit 0; sleep 2; done; echo "Rete non pronta dopo 5 minuti, avvio Home Assistant comunque"'
+# L'attesa qui sopra conta nel timeout di avvio, che di default e' 90 secondi.
+TimeoutStartSec=600
 # Deve superare StopTimeout, altrimenti systemd uccide il container per primo.
 TimeoutStopSec=90
 
