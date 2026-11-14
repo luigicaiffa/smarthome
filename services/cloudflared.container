@@ -12,7 +12,11 @@ Image=docker.io/cloudflare/cloudflared:latest
 # (vedi podman-auto-update-nightly.conf). Se dopo il riavvio il servizio
 # non parte, podman torna da solo all'immagine precedente.
 AutoUpdate=registry
-Exec=tunnel run
+# Metriche solo su localhost. Senza --metrics le espone su tutte le interfacce
+# e, con Network=host, chiunque in LAN poteva leggere /config: hostname e
+# destinazione del tunnel.
+Exec=tunnel --metrics 127.0.0.1:20241 run
+# Solo cloudflared legge questo file: contiene TUNNEL_TOKEN.
 EnvironmentFile=/var/home/core/homeassistant/secrets.env
 Network=host
 

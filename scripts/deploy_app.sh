@@ -75,6 +75,26 @@ sudo mkdir -p /etc/zincati/config.d
 sudo cp "$SERVICES_SRC/zincati-updates-strategy.toml" /etc/zincati/config.d/55-updates-strategy.toml
 sudo systemctl restart zincati.service
 
+# 3.3 LLMNR spento: niente risposte di risoluzione nomi in LAN sulla 5355.
+# Il riavvio del resolver dura un istante e non tocca i container.
+echo "🔇 Disattivazione LLMNR..."
+sudo mkdir -p /etc/systemd/resolved.conf.d
+sudo cp "$SERVICES_SRC/resolved-no-llmnr.conf" /etc/systemd/resolved.conf.d/90-no-llmnr.conf
+sudo systemctl restart systemd-resolved.service
+
+# 3.4 Irrobustimento di sshd. Prima si valida la configurazione: un errore
+# qui chiuderebbe fuori dal server, quindi se sshd -t fallisce il file viene
+# tolto e si prosegue senza. Il reload non chiude le sessioni aperte.
+echo "🔐 Configurazione sshd..."
+SSHD_DROPIN=/etc/ssh/sshd_config.d/40-hardening.conf
+sudo cp "$SERVICES_SRC/sshd-hardening.conf" "$SSHD_DROPIN"
+if sudo sshd -t; then
+    sudo systemctl reload sshd.service
+else
+    echo "❌ Configurazione sshd non valida: rimuovo $SSHD_DROPIN"
+    sudo rm -f "$SSHD_DROPIN"
+fi
+
 # 4. Reload Systemd (Utente + Sistema)
 echo "🔄 Ricaricamento Systemd..."
 systemctl --user daemon-reload

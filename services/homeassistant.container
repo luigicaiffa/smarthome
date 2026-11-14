@@ -16,8 +16,11 @@ SecurityLabelDisable=true
 AddCapability=NET_ADMIN
 AddCapability=NET_RAW
 
-# Percorsi ASSOLUTI ai file dell'utente core
-EnvironmentFile=/var/home/core/homeassistant/secrets.env
+# Niente EnvironmentFile: secrets.env contiene il TUNNEL_TOKEN di cloudflared,
+# e passarlo ad HA lo rendeva leggibile da qualunque integrazione (HACS
+# compresa) tramite le variabili d'ambiente. Ad HA serve solo il fuso orario,
+# che non e' un segreto.
+Environment=TZ=Europe/Rome
 Network=host
 
 # Volumi

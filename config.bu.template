@@ -94,9 +94,9 @@ storage:
       contents:
         inline: "net.ipv4.ip_unprivileged_port_start=80"
 
-    # --- SEGRETI CONDIVISI (Cloudflare + Home Assistant) ---
-    # Letto sia da cloudflared (rootless, utente core) sia da homeassistant
-    # (rootful, root): entrambi puntano qui via EnvironmentFile.
+    # --- SEGRETI DI CLOUDFLARED ---
+    # Letto SOLO da cloudflared (rootless, utente core) via EnvironmentFile.
+    # Home Assistant non lo riceve: il fuso orario glielo da' il suo .container.
     # Placeholder iniziale: verra' sovrascritto da push_update.sh con i valori reali.
     - path: /var/home/core/homeassistant/secrets.env
       mode: 0600
@@ -107,7 +107,18 @@ storage:
       contents:
         inline: |
           TUNNEL_TOKEN=inserisci_qui_il_tuo_token_cloudflare_reale
-          TZ=Europe/Rome
+
+    # LLMNR spento (vedi il commento nel file).
+    - path: /etc/systemd/resolved.conf.d/90-no-llmnr.conf
+      mode: 0644
+      contents:
+        local: services/resolved-no-llmnr.conf
+
+    # Irrobustimento di sshd (vedi il commento nel file).
+    - path: /etc/ssh/sshd_config.d/40-hardening.conf
+      mode: 0644
+      contents:
+        local: services/sshd-hardening.conf
 
     # --- INIEZIONE DEI SERVIZI DA GIT ---
     - path: /etc/systemd/system/install-bluez.service
