@@ -173,6 +173,17 @@ if systemctl is-enabled bluetooth.service &>/dev/null; then
     sudo systemctl disable --now bluetooth.service || true
 fi
 
+# 5.5 network-online.target attivato al boot.
+# I servizi rootless partono dopo podman-user-wait-network-online.service, che
+# ASPETTA network-online.target ma non lo richiede. Quando HA era un servizio
+# di sistema era lui a tirarlo dentro; ora nessuno lo fa, il target non si
+# attiva mai e ogni boot perdeva 90 secondi di timeout prima di avviare HA e
+# il tunnel (visto al primo riavvio dopo la migrazione, 14/11/2026).
+if [ ! -L /etc/systemd/system/multi-user.target.wants/network-online.target ]; then
+    echo "🌐 Abilito network-online.target al boot..."
+    sudo systemctl add-wants multi-user.target network-online.target
+fi
+
 # 6. Ricaricamento di systemd (sistema e utenti di servizio)
 echo "🔄 Ricaricamento Systemd..."
 sudo systemctl daemon-reload

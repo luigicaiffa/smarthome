@@ -102,6 +102,14 @@ storage:
         name: cloudflared
 
   links:
+    # network-online.target attivato al boot ('systemctl add-wants
+    # multi-user.target network-online.target'). I servizi rootless lo
+    # aspettano tramite podman-user-wait-network-online.service, che pero' non
+    # lo richiede: senza questo link nessuno lo attiva e ogni boot perde 90
+    # secondi di timeout prima di avviare HA e il tunnel.
+    - path: /etc/systemd/system/multi-user.target.wants/network-online.target
+      target: /usr/lib/systemd/system/network-online.target
+
     # Equivale a 'systemctl --user enable podman-auto-update.timer' per
     # cloudflared: systemd.units di Ignition gestisce solo le unit di sistema.
     # Home Assistant non ha il timer: si aggiorna a mano con update_ha.sh.
