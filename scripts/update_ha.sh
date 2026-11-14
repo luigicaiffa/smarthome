@@ -18,21 +18,31 @@ set -e
 #   ./scripts/update_ha.sh --skip-backup   salta il backup (sconsigliato)
 #   ./scripts/update_ha.sh --rollback      torna all'immagine precedente
 #
-# Variabile opzionale:
-#   HA_TOKEN=<long-lived token>  abilita le verifiche via API (stato RUNNING e
-#                                check_config). Senza, si controlla solo che il
-#                                frontend risponda.
+# Il backup è quello nativo di HA (azione backup.create_automatic): usa le
+# impostazioni dei backup automatici, quindi è cifrato e va sugli stessi
+# archivi (locale e cloud). Serve un token di accesso a lunga vita:
+#   HA_TOKEN=<token>  variabile d'ambiente, oppure riga HA_TOKEN=... nel file
+#                     .ha_env alla radice del repo (ignorato da git; il percorso
+#                     si cambia con HA_ENV_FILE). Abilita anche le verifiche
+#                     finali (stato RUNNING e check_config).
 # ------------------------------------------
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+HA_ENV_FILE="${HA_ENV_FILE:-$SCRIPT_DIR/../.ha_env}"
+if [ -z "${HA_TOKEN:-}" ] && [ -f "$HA_ENV_FILE" ]; then
+    # shellcheck source=/dev/null
+    source "$HA_ENV_FILE"
+fi
+
 SERVER_HOST="fcos-ha"
 REMOTE_USER="core"
-HA_URL="http://192.168.68.100:8123"
+HA_URL="${HA_URL:-http://192.168.68.100:8123}"
 IMAGE="ghcr.io/home-assistant/home-assistant:stable"
 HA_VERSION_FILE="/var/home/core/homeassistant/config/.HA_VERSION"
 ROLLBACK_PTR="localhost/home-assistant:rollback-previous"
-WAIT_TIMEOUT=420   # secondi massimi di attesa dell'avvio
+WAIT_TIMEOUT=420     # secondi massimi di attesa dell'avvio
+BACKUP_TIMEOUT=1800  # secondi massimi per il backup (upload cloud compreso)
 
 ASSUME_YES=0
 SKIP_BACKUP=0
@@ -43,7 +53,7 @@ for arg in "$@"; do
         -y|--yes)      ASSUME_YES=1 ;;
         --skip-backup) SKIP_BACKUP=1 ;;
         --rollback)    DO_ROLLBACK=1 ;;
-        -h|--help)     sed -n '7,26p' "$0"; exit 0 ;;
+        -h|--help)     sed -n '7,27p' "$0"; exit 0 ;;
         *) echo "❌ Opzione sconosciuta: $arg (usa --help)"; exit 1 ;;
     esac
 done
@@ -79,6 +89,47 @@ wait_for_ha() {
     echo "⚠️  Timeout dopo ${WAIT_TIMEOUT}s: HA non risponde ancora."
     echo "    Log:  ssh $REMOTE_USER@$SERVER_HOST 'sudo podman logs -f homeassistant'"
     return 1
+}
+
+# Stato di un'entità via API REST; stringa vuota se non disponibile.
+ha_state() {
+    curl -s -m 10 -H "Authorization: Bearer $HA_TOKEN" "$HA_URL/api/states/$1" 2>/dev/null \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("state", ""))' 2>/dev/null \
+        || true
+}
+
+# Backup nativo con le impostazioni automatiche (cifrato, stessi archivi del
+# backup notturno). HA resta acceso. L'esito si legge dal sensore dell'ultimo
+# backup riuscito: se non cambia, il backup è fallito.
+backup_nativo() {
+    local prima stato esito deadline dopo
+    prima=$(ha_state sensor.backup_last_successful_automatic_backup)
+    stato=$(ha_state sensor.backup_backup_manager_state)
+    if [ "$stato" != "idle" ]; then
+        echo "❌ Il gestore dei backup non è libero (stato: ${stato:-non leggibile})."
+        echo "   C'è già un backup o un ripristino in corso, oppure il token non è valido."
+        return 1
+    fi
+
+    echo "   Backup in corso (cifrato, locale + cloud): può volerci qualche minuto..."
+    # L'azione risponde solo a backup finito, upload compresi.
+    esito=$(curl -s -o /dev/null -w '%{http_code}' -m "$BACKUP_TIMEOUT" -X POST \
+        -H "Authorization: Bearer $HA_TOKEN" -H "Content-Type: application/json" \
+        -d '{}' "$HA_URL/api/services/backup/create_automatic" 2>/dev/null || true)
+
+    # Se la richiesta è scaduta il backup può essere ancora in corso: attendo.
+    deadline=$(( SECONDS + BACKUP_TIMEOUT ))
+    while [ "$(ha_state sensor.backup_backup_manager_state)" != "idle" ] && [ $SECONDS -lt $deadline ]; do
+        sleep 10
+    done
+
+    dopo=$(ha_state sensor.backup_last_successful_automatic_backup)
+    if [ -z "$dopo" ] || [ "$dopo" = "$prima" ] || [ "$dopo" = "unknown" ]; then
+        echo "❌ Backup non riuscito (risposta HTTP: ${esito:-nessuna})."
+        echo "   Dettagli in Impostazioni > Sistema > Backup."
+        return 1
+    fi
+    echo "✅ Backup completato: $dopo (UTC)"
 }
 
 # --- Verifica raggiungibilità ---
@@ -133,8 +184,10 @@ if [ "$DO_ROLLBACK" -eq 1 ]; then
     echo "✅ Rollback completato: $(remote "sudo cat $HA_VERSION_FILE")"
     echo ""
     echo "⚠️  ATTENZIONE: il database è già stato migrato alla versione più recente."
-    echo "    Se HA non parte o si comporta male, ripristina anche il backup:"
-    echo "    ./scripts/remote_restore.sh"
+    echo "    Se HA si comporta male, ripristina anche il backup fatto prima"
+    echo "    dell'aggiornamento: Impostazioni > Sistema > Backup > Ripristina"
+    echo "    (serve la chiave di cifratura dei backup). Se HA non parte proprio,"
+    echo "    vedi il README, sezione 'Backup & Disaster Recovery'."
     exit 0
 fi
 
@@ -143,6 +196,14 @@ fi
 # ==========================================
 echo "⬆️  Aggiornamento Home Assistant su $SERVER_HOST"
 echo "   Versione attuale: $CURRENT_VERSION"
+
+# Il backup preventivo passa dall'API: senza token meglio fermarsi subito,
+# prima di scaricare l'immagine.
+if [ "$SKIP_BACKUP" -eq 0 ] && [ -z "${HA_TOKEN:-}" ]; then
+    echo "❌ Manca HA_TOKEN, necessario per il backup preventivo."
+    echo "   Crea $HA_ENV_FILE con una riga HA_TOKEN=..., oppure usa --skip-backup."
+    exit 1
+fi
 
 # --- 1. Pull (HA resta acceso: nessun downtime in questa fase) ---
 echo ""
@@ -183,17 +244,22 @@ remote "sudo podman tag '$CURRENT_IMAGE_ID' '$ROLLBACK_PTR' \
      && sudo podman tag '$CURRENT_IMAGE_ID' 'localhost/home-assistant:rollback-${CURRENT_VERSION}'"
 echo "✅ Immagine $CURRENT_VERSION conservata (--rollback per tornare indietro)"
 
-# --- 4. Backup preventivo (ferma HA, comprime e scarica in ./backups) ---
+# --- 4. Backup preventivo (nativo, cifrato, con HA ancora sulla versione vecchia) ---
 if [ "$SKIP_BACKUP" -eq 1 ]; then
     echo ""
     echo "⚠️  Backup SALTATO su richiesta esplicita."
 else
     echo ""
     echo "--- 📦 Backup preventivo ---"
-    # NB: remote_backup.sh riavvia HA a fine backup, quindi il container riparte
-    # già sulla nuova immagine. Il tar però viene creato a servizio fermo e prima
-    # di qualunque migrazione del database: resta uno snapshot pre-aggiornamento.
-    "$SCRIPT_DIR/remote_backup.sh"
+    # Il container gira ancora sull'immagine vecchia: il backup è fatto prima di
+    # qualunque migrazione del database.
+    if ! backup_nativo; then
+        echo ""
+        echo "Aggiornamento interrotto: HA non è stato riavviato e resta su $CURRENT_VERSION."
+        echo "NB: la nuova immagine è già scaricata, quindi un riavvio del server la"
+        echo "applicherebbe comunque. Rilancia lo script dopo aver risolto il problema."
+        exit 1
+    fi
 fi
 
 # --- 5. Riavvio controllato ---

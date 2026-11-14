@@ -7,7 +7,7 @@ Questo progetto automatizza il deployment di **Home Assistant** e **Cloudflare T
 *   🛡️ **Immutabile:** Sistema operativo gestito via `ostree`, aggiornamenti atomici.
 *   🔐 **Sicurezza Ibrida:** Cloudflare Tunnel gira in modalità **Rootless** (utente) per sicurezza, mentre Home Assistant gira in modalità **Rootful** (sistema) per garantire l'accesso diretto all'hardware (Bluetooth/USB).
 *   🤖 **Zero-Touch:** Installazione tramite ISO autoconfigurante. Inserisci la chiavetta e fa tutto da solo.
-*   🔄 **Smart Restore:** Ripristino intelligente che unisce i dati storici con la configurazione più recente.
+*   🔄 **Backup cifrati:** Backup nativi di Home Assistant, cifrati, ogni notte sul server e nel cloud; il server si ricrea dal repository.
 
 ---
 
@@ -15,12 +15,12 @@ Questo progetto automatizza il deployment di **Home Assistant** e **Cloudflare T
 
 ```text
 📂 .
-├── 📂 backups/              # 📦 Backup scaricati dal server (ignorati da git)
 ├── 📂 services/             # ⚙️ Definizioni dei Container (Systemd/Quadlet .container)
-├── 📂 scripts/              # 🛠️ Script di automazione (Build, Deploy, Backup)
+├── 📂 scripts/              # 🛠️ Script di automazione (Build, Deploy, Aggiornamento)
 ├── 📄 config.bu.template    # 📄 Template Butane per la configurazione dell'OS
 ├── 📄 secrets.env.template  # 📄 Template per le variabili d'ambiente
 ├── 📄 secrets.env           # 🔑 Variabili sensibili (NON committare su Git!)
+├── 📄 .ha_env               # 🔑 Token di HA per update_ha.sh (NON committare su Git!)
 └── 📘 README.md             # 📖 Questo file
 ```
 
@@ -162,16 +162,20 @@ Lo script:
 2.  Si ferma subito se sei già all'ultima versione.
 3.  Mostra `versione attuale → versione nuova` e chiede conferma.
 4.  Conserva l'immagine attuale come tag di rollback.
-5.  Esegue un backup completo in `backups/` (riusa `remote_backup.sh`).
+5.  Esegue un backup nativo di HA (azione `backup.create_automatic`) **senza fermare HA**
+    e prima di qualunque migrazione del database. Usa le impostazioni dei backup
+    automatici: è cifrato e finisce sugli stessi archivi del backup notturno. Se il
+    backup fallisce lo script si ferma e HA resta sulla versione vecchia.
 6.  Riavvia il container e attende che HA risponda.
-7.  Verifica versione installata ed errori nel log.
+7.  Verifica versione installata, `check_config` ed errori nel log.
 
 Opzioni: `-y` (nessuna conferma), `--skip-backup`, `--rollback`.
 
-Impostando `HA_TOKEN` (token di accesso a lunga vita) le verifiche finali includono
-anche lo stato `RUNNING` e `check_config`:
+Il backup passa dall'API, quindi serve un token di accesso a lunga vita (profilo utente >
+Sicurezza). Lo script lo legge dalla variabile `HA_TOKEN` oppure dal file `.ha_env` alla
+radice del repo (ignorato da git, permessi 600):
 ```bash
-HA_TOKEN=xxxx ./scripts/update_ha.sh
+HA_TOKEN=xxxx
 ```
 
 ### Tornare indietro
@@ -180,7 +184,8 @@ HA_TOKEN=xxxx ./scripts/update_ha.sh
 ```
 Ripristina l'immagine precedente e riavvia. **Attenzione**: il database viene migrato
 al primo avvio della versione nuova e la migrazione non è reversibile. Se dopo il
-rollback HA si comporta male, ripristina anche il backup con `./scripts/remote_restore.sh`.
+rollback HA si comporta male, ripristina anche il backup fatto prima dell'aggiornamento
+(vedi la sezione 5).
 
 ### Dopo l'aggiornamento
 -   **Svuota la cache del browser.** Il service worker continua a servire il frontend
@@ -195,24 +200,42 @@ rollback HA si comporta male, ripristina anche il backup con `./scripts/remote_r
 
 ## 5. Backup & Disaster Recovery
 
-### Eseguire Backup
-Salva il database e le configurazioni di Home Assistant dal server al tuo PC.
-```bash
-./scripts/remote_backup.sh
-```
+Cosa serve per ricostruire tutto, e dove sta:
 
-Il file `.tar.gz` verrà salvato nella cartella locale `backups/`.
+| Cosa | Dove |
+|---|---|
+| Sistema operativo, container, servizi | Questo repository (Ignition + `push_update.sh`) |
+| Token del tunnel (`secrets.env`) | Si rigenera dal pannello Cloudflare Zero Trust |
+| Dati e configurazione di Home Assistant | **Backup nativi di HA**, cifrati |
+| Chiave di cifratura dei backup | Kit di emergenza, da conservare in un gestore di password |
 
-### Ripristinare (Restore)
-Da usare dopo una reinstallazione o su un nuovo hardware.
-```bash
-./scripts/remote_restore.sh
-```
+### Backup
+Si configurano da *Impostazioni > Sistema > Backup* (le impostazioni stanno in
+`.storage`, quindi viaggiano con il backup stesso):
+-   backup automatico ogni notte, cifrato, cronologia compresa;
+-   copie sul server (`homeassistant/config/backups/`) e su un archivio cloud
+    (es. integrazione Google Drive), ognuna con la sua conservazione;
+-   `update_ha.sh` ne fa uno in più subito prima di ogni aggiornamento.
 
-**Logica "Smart Restore"**:
-1.  **Carica i DATI dal backup**: Database e file persistenti di Home Assistant vengono ripristinati.
-2.  **Sovrascrive la CONFIGURAZIONE**: I file dei servizi (`.container`) e i segreti (`secrets.env`) vengono presi dal tuo PC.
-    Questo approccio garantisce di ripartire con i dati storici ma con la configurazione più recente e sicura del repository.
+Backup manuale: *Impostazioni > Sistema > Backup > Esegui backup ora*.
+
+### Ripristinare
+**HA funziona** (es. dopo un aggiornamento andato male): *Impostazioni > Sistema >
+Backup*, scegli il backup, *Ripristina* e inserisci la chiave di cifratura.
+
+**HA non parte, o server reinstallato:**
+1.  Se serve, reinstalla il server (sezione 2) e lancia `./scripts/push_update.sh`.
+2.  Se la vecchia configurazione è ancora lì ma rotta, mettila da parte così HA riparte da zero:
+    ```bash
+    ssh fcos-ha 'sudo systemctl stop homeassistant \
+      && mv ~/homeassistant/config ~/homeassistant/config.rotta \
+      && mkdir ~/homeassistant/config \
+      && sudo systemctl start homeassistant'
+    ```
+3.  Apri `http://<ip-del-server>:8123`: nella procedura iniziale scegli
+    **Ripristina da backup** e carica il file `.tar` (dall'archivio cloud, oppure da
+    `config.rotta/backups/`).
+4.  Inserisci la chiave di cifratura e attendi il riavvio.
 
 ============================================================
 

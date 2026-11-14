@@ -65,3 +65,5 @@ cache/
 backups/
 *.tar.gz
 *.bak
+# --- TOKEN HOME ASSISTANT (update_ha.sh) ---
+.ha_env
