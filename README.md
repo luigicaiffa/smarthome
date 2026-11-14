@@ -5,7 +5,7 @@ Questo progetto automatizza il deployment di **Home Assistant** e **Cloudflare T
 
 ### ✨ Filosofia del Progetto
 *   🛡️ **Immutabile:** Sistema operativo gestito via `ostree`, aggiornamenti atomici.
-*   🔐 **Sicurezza Ibrida:** Cloudflare Tunnel gira in modalità **Rootless** (utente) per sicurezza, mentre Home Assistant gira in modalità **Rootful** (sistema) per garantire l'accesso diretto all'hardware (Bluetooth/USB).
+*   🔐 **Tutto rootless, un utente per servizio:** Home Assistant e Cloudflare Tunnel girano in container **rootless**, ognuno con il proprio utente senza shell né sudo, confinati da SELinux. `core` serve solo ad amministrare (vedi [Utenti e permessi](#utenti-e-permessi)).
 *   🤖 **Zero-Touch:** Installazione tramite ISO autoconfigurante. Inserisci la chiavetta e fa tutto da solo.
 *   🔄 **Backup cifrati:** Backup nativi di Home Assistant, cifrati, ogni notte sul server e nel cloud; il server si ricrea dal repository.
 
@@ -22,6 +22,29 @@ Questo progetto automatizza il deployment di **Home Assistant** e **Cloudflare T
 ├── 📄 secrets.env           # 🔑 Variabili sensibili (NON committare su Git!)
 ├── 📄 .ha_env               # 🔑 Token di HA per update_ha.sh (NON committare su Git!)
 └── 📘 README.md             # 📖 Questo file
+```
+
+## Utenti e permessi
+
+| Utente | Ruolo | Privilegi |
+|---|---|---|
+| `core` | amministrazione: SSH con chiave, `push_update.sh`, `update_ha.sh` | sudo; non fa girare servizi |
+| `homeassistant` (uid 1001) | solo il container di Home Assistant, dati in `/var/home/homeassistant/config` | nessuno: niente shell, chiavi o sudo |
+| `cloudflared` (uid 1002) | solo il tunnel, token in `/var/home/cloudflared/secrets.env` | nessuno: niente shell, chiavi o sudo |
+
+I container sono **rootless** e girano con l'etichetta SELinux standard (`container_t`),
+senza capability aggiuntive. Chi compromettesse un'integrazione di HA resterebbe chiuso
+nel container; se anche ne uscisse, troverebbe un utente che non può fare nulla e non
+potrebbe leggere il token del tunnel. Solo `core` può entrare via SSH (`AllowUsers`).
+
+Niente Bluetooth: richiedeva HA come root con SELinux spento. Se servirà, la strada è
+un proxy Bluetooth ESPHome in rete, che non chiede permessi al server.
+
+Per agire come utente di servizio c'è `svc-run`, installato sul server:
+```bash
+svc-run homeassistant systemctl --user restart homeassistant.service
+svc-run homeassistant podman exec -it homeassistant bash
+svc-run cloudflared systemctl --user status cloudflared.service
 ```
 
 ## 1. Prerequisiti (Setup Locale)
@@ -92,8 +115,18 @@ Se hai modificato un file `.container` o `secrets.env`:
 
 Questo script:
 1.  Copia le configurazioni aggiornate (`services/`, `scripts/`) sul server.
-2.  Aggiorna il file dei segreti (`secrets.env`).
-3.  Ricarica Systemd e riavvia i servizi necessari automaticamente.
+2.  Consegna `secrets.env` all'utente `cloudflared` (la copia di `core` viene distrutta).
+3.  Lancia `deploy_app.sh`, che installa ogni quadlet nella home del suo utente,
+    ricarica systemd e riavvia i servizi.
+
+### Migrazione dalla vecchia installazione (una tantum)
+Fino a novembre 2026 HA girava come root sotto `core`. Su un server installato con la
+versione precedente, dopo `push_update.sh` va lanciato una volta:
+```bash
+ssh fcos-ha ~/scripts/migrate_rootless.sh             # migra (HA fermo qualche minuto)
+ssh fcos-ha ~/scripts/migrate_rootless.sh --rollback  # torna com'era
+```
+Finché la migrazione non è fatta, `deploy_app.sh` prepara utenti e file ma non tocca i servizi.
 
 ============================================================
 
@@ -101,7 +134,7 @@ Questo script:
 
 | Componente | Come si aggiorna |
 |---|---|
-| Fedora CoreOS (OS + pacchetti `bluez`) | Automatico, tramite **Zincati**, con riavvio **solo tra le 03:00 e le 03:45** (ora italiana) |
+| Fedora CoreOS | Automatico, tramite **Zincati**, con riavvio **solo tra le 03:00 e le 03:45** (ora italiana) |
 | Cloudflare Tunnel (`cloudflared`) | Automatico, **ogni notte alle 04:00** (ora italiana) |
 | Home Assistant | Manuale, con `./scripts/update_ha.sh` |
 
@@ -125,31 +158,31 @@ ssh fcos-ha "rpm-ostree status"
 `cloudflared` non ha stato né integrazioni da rompere, mentre le versioni troppo
 vecchie smettono di essere supportate da Cloudflare: conviene tenerlo sempre aggiornato.
 
-Il quadlet ha `AutoUpdate=registry` ed è abilitato il timer **utente**
-`podman-auto-update.timer`, che verifica il registry ogni notte alle 04:00 (± 15 min)
+Il quadlet ha `AutoUpdate=registry` ed è abilitato il timer `podman-auto-update.timer`
+**dell'utente `cloudflared`**, che verifica il registry ogni notte alle 04:00 (± 15 min)
 e, se c'è una nuova immagine, la scarica e riavvia il servizio. Se il servizio non
 riparte, podman ripristina da solo l'immagine precedente. Se il server era spento
 all'ora prevista, il controllo salta alla notte successiva.
 
-Il timer utente vede solo i container rootless, quindi Home Assistant (rootful) non
-viene mai toccato. Il timer di **sistema** resta disabilitato (`deploy_app.sh` lo
-forza spento).
+Il timer di un utente vede solo i suoi container, quindi Home Assistant (utente
+`homeassistant`, senza timer né `AutoUpdate`) non viene mai toccato. Il timer di
+**sistema** resta disabilitato (`deploy_app.sh` lo forza spento).
 
 ```bash
 # Prossima esecuzione
-ssh fcos-ha "systemctl --user list-timers podman-auto-update.timer"
+ssh fcos-ha "svc-run cloudflared systemctl --user list-timers podman-auto-update.timer"
 # Esito delle ultime esecuzioni
-ssh fcos-ha "journalctl --user -u podman-auto-update.service"
+ssh fcos-ha "journalctl _UID=1002 --user-unit podman-auto-update.service"
 # Cosa verrebbe aggiornato adesso (senza applicare nulla)
-ssh fcos-ha "podman auto-update --dry-run"
+ssh fcos-ha "svc-run cloudflared podman auto-update --dry-run"
 # Forzare subito l'aggiornamento
-ssh fcos-ha "systemctl --user start podman-auto-update.service"
+ssh fcos-ha "svc-run cloudflared systemctl --user start podman-auto-update.service"
 ```
 
 ### Home Assistant (manuale)
 
-Il quadlet usa il tag mobile `:stable` con `AutoUpdate=registry`, ma il timer
-`podman-auto-update.timer` di sistema è **disabilitato di proposito**: un aggiornamento non
+Il quadlet usa il tag mobile `:stable` **senza** `AutoUpdate`, e l'utente `homeassistant`
+non ha il timer di aggiornamento, **di proposito**: un aggiornamento non
 presidiato può rompere dashboard, card HACS e integrazioni custom senza preavviso.
 L'aggiornamento si fa quindi a mano, in modo controllato:
 
@@ -213,7 +246,7 @@ Cosa serve per ricostruire tutto, e dove sta:
 Si configurano da *Impostazioni > Sistema > Backup* (le impostazioni stanno in
 `.storage`, quindi viaggiano con il backup stesso):
 -   backup automatico ogni notte, cifrato, cronologia compresa;
--   copie sul server (`homeassistant/config/backups/`) e su un archivio cloud
+-   copie sul server (`/var/home/homeassistant/config/backups/`) e su un archivio cloud
     (es. integrazione Google Drive), ognuna con la sua conservazione;
 -   `update_ha.sh` ne fa uno in più subito prima di ogni aggiornamento.
 
@@ -227,14 +260,14 @@ Backup*, scegli il backup, *Ripristina* e inserisci la chiave di cifratura.
 1.  Se serve, reinstalla il server (sezione 2) e lancia `./scripts/push_update.sh`.
 2.  Se la vecchia configurazione è ancora lì ma rotta, mettila da parte così HA riparte da zero:
     ```bash
-    ssh fcos-ha 'sudo systemctl stop homeassistant \
-      && mv ~/homeassistant/config ~/homeassistant/config.rotta \
-      && mkdir ~/homeassistant/config \
-      && sudo systemctl start homeassistant'
+    ssh fcos-ha 'svc-run homeassistant systemctl --user stop homeassistant.service \
+      && sudo -u homeassistant mv /var/home/homeassistant/config /var/home/homeassistant/config.rotta \
+      && sudo -u homeassistant mkdir -m 0750 /var/home/homeassistant/config \
+      && svc-run homeassistant systemctl --user start homeassistant.service'
     ```
 3.  Apri `http://<ip-del-server>:8123`: nella procedura iniziale scegli
     **Ripristina da backup** e carica il file `.tar` (dall'archivio cloud, oppure da
-    `config.rotta/backups/`).
+    `/var/home/homeassistant/config.rotta/backups/`).
 4.  Inserisci la chiave di cifratura e attendi il riavvio.
 
 ============================================================
@@ -252,16 +285,16 @@ Cloudflare Tunnel non richiede IP pubblico statico né apertura di porte sul rou
 
 1.  **Verifica lo stato del servizio:**
     ```bash
-    ssh fcos-ha "systemctl --user status cloudflared"
+    ssh fcos-ha "svc-run cloudflared systemctl --user status cloudflared.service"
     ```
     Se non è `active (running)`, prova a riavviarlo:
     ```bash
-    ssh fcos-ha "systemctl --user restart cloudflared"
+    ssh fcos-ha "svc-run cloudflared systemctl --user restart cloudflared.service"
     ```
 
 2.  **Controlla i log in tempo reale:**
     ```bash
-    ssh fcos-ha "journalctl --user -f -u cloudflared"
+    ssh fcos-ha "journalctl _UID=1002 --user-unit cloudflared.service -f"
     ```
     Cerca messaggi di errore relativi alla connessione con i server di Cloudflare o al token di autenticazione.
 
@@ -269,26 +302,26 @@ Cloudflare Tunnel non richiede IP pubblico statico né apertura di porte sul rou
 
 **Stato dei servizi:**
 ```bash
-# Home Assistant (servizio di sistema)
-systemctl status homeassistant
+# Home Assistant (utente homeassistant)
+svc-run homeassistant systemctl --user status homeassistant.service
 
-# Cloudflare Tunnel (servizio utente)
-systemctl --user status cloudflared
+# Cloudflare Tunnel (utente cloudflared)
+svc-run cloudflared systemctl --user status cloudflared.service
 ```
 
-**Log in tempo reale:**
+**Log in tempo reale** (core è nel gruppo `systemd-journal`, non serve sudo):
 ```bash
 # Home Assistant
-journalctl -f -u homeassistant
+journalctl _UID=1001 --user-unit homeassistant.service -f
 
 # Cloudflare Tunnel
-journalctl --user -f -u cloudflared
+journalctl _UID=1002 --user-unit cloudflared.service -f
 ```
 
 **Aggiornamento manuale delle immagini container:**
 ```bash
-# cloudflared (rootless): forza subito il controllo notturno
-systemctl --user start podman-auto-update.service
+# cloudflared: forza subito il controllo notturno
+svc-run cloudflared systemctl --user start podman-auto-update.service
 
 # Home Assistant: dal PC, con backup e rollback
 ./scripts/update_ha.sh

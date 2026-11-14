@@ -43,18 +43,20 @@ else
 fi
 
 # 2.3 Secrets
+# Arrivano in ~/incoming di core (700) e deploy_app.sh li passa all'utente
+# cloudflared, poi distrugge la copia: core non tiene il token.
 LOCAL_SECRETS="$PROJECT_ROOT/secrets.env"
 if [ -f "$LOCAL_SECRETS" ]; then
     echo "✅ Invio secrets.env..."
-    ssh "$REMOTE_USER@$SERVER_HOST" "mkdir -p ~/homeassistant"
-    scp "$LOCAL_SECRETS" "$REMOTE_USER@$SERVER_HOST:~/homeassistant/secrets.env"
+    ssh "$REMOTE_USER@$SERVER_HOST" "mkdir -p -m 0700 ~/incoming"
+    scp "$LOCAL_SECRETS" "$REMOTE_USER@$SERVER_HOST:~/incoming/secrets.env"
 else
     echo "⚠️  ATTENZIONE: secrets.env non trovato in locale ($LOCAL_SECRETS)."
 fi
 
 echo ""
 echo "--- ⚙️  Esecuzione Deploy Remoto ---"
-ssh "$REMOTE_USER@$SERVER_HOST" "chmod +x ~/scripts/deploy_app.sh && ~/scripts/deploy_app.sh"
+ssh "$REMOTE_USER@$SERVER_HOST" "chmod +x ~/scripts/*.sh && ~/scripts/deploy_app.sh"
 
 echo ""
 echo "✅ Aggiornamento completato con successo!"

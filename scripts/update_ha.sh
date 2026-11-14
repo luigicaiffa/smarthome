@@ -7,10 +7,12 @@ set -e
 # ⬆️  UPDATE HOME ASSISTANT (immagine container)
 # ==========================================
 #
-# Il quadlet usa il tag mobile ':stable' con AutoUpdate=registry, ma il timer
-# podman-auto-update è disabilitato di proposito: un aggiornamento non presidiato
-# di HA può rompere dashboard, card HACS e integrazioni custom senza preavviso.
-# Questo script fa lo stesso lavoro in modo controllato e reversibile.
+# Il quadlet usa il tag mobile ':stable' ma senza AutoUpdate, e l'utente
+# homeassistant non ha il timer podman-auto-update: un aggiornamento non
+# presidiato di HA può rompere dashboard, card HACS e integrazioni custom senza
+# preavviso. Questo script aggiorna in modo controllato e reversibile.
+# HA gira rootless sotto l'utente homeassistant: immagini, tag di rollback e
+# servizio sono suoi, e qui si raggiungono con svc-run (vedi services/svc-run).
 #
 # Uso:
 #   ./scripts/update_ha.sh                 pull + backup + riavvio + verifica
@@ -39,7 +41,7 @@ SERVER_HOST="fcos-ha"
 REMOTE_USER="core"
 HA_URL="${HA_URL:-http://192.168.68.100:8123}"
 IMAGE="ghcr.io/home-assistant/home-assistant:stable"
-HA_VERSION_FILE="/var/home/core/homeassistant/config/.HA_VERSION"
+HA_VERSION_FILE="/var/home/homeassistant/config/.HA_VERSION"
 ROLLBACK_PTR="localhost/home-assistant:rollback-previous"
 WAIT_TIMEOUT=420     # secondi massimi di attesa dell'avvio
 BACKUP_TIMEOUT=1800  # secondi massimi per il backup (upload cloud compreso)
@@ -87,7 +89,7 @@ wait_for_ha() {
     done
     echo ""
     echo "⚠️  Timeout dopo ${WAIT_TIMEOUT}s: HA non risponde ancora."
-    echo "    Log:  ssh $REMOTE_USER@$SERVER_HOST 'sudo podman logs -f homeassistant'"
+    echo "    Log:  ssh $REMOTE_USER@$SERVER_HOST 'svc-run homeassistant podman logs -f homeassistant'"
     return 1
 }
 
@@ -149,10 +151,10 @@ if [ "$DO_ROLLBACK" -eq 1 ]; then
 
     # Di norma si usa il puntatore; in mancanza si accetta un tag 'rollback-*'
     # versionato, creato a mano o da una versione precedente dello script.
-    if remote "sudo podman image exists '$ROLLBACK_PTR'"; then
+    if remote "svc-run homeassistant podman image exists '$ROLLBACK_PTR'"; then
         ROLLBACK_TARGET="$ROLLBACK_PTR"
     else
-        ROLLBACK_TARGET=$(remote "sudo podman images --format '{{.Repository}}:{{.Tag}}' \
+        ROLLBACK_TARGET=$(remote "svc-run homeassistant podman images --format '{{.Repository}}:{{.Tag}}' \
             | grep '^localhost/home-assistant:rollback-' | head -1" || true)
     fi
 
@@ -162,15 +164,15 @@ if [ "$DO_ROLLBACK" -eq 1 ]; then
         exit 1
     fi
 
-    TARGET_ID=$(remote "sudo podman inspect --format '{{.Id}}' '$ROLLBACK_TARGET'")
-    RUNNING_ID=$(remote "sudo podman inspect --format '{{.Image}}' homeassistant")
+    TARGET_ID=$(remote "svc-run homeassistant podman inspect --format '{{.Id}}' '$ROLLBACK_TARGET'")
+    RUNNING_ID=$(remote "svc-run homeassistant podman inspect --format '{{.Image}}' homeassistant")
     if [ "$TARGET_ID" = "$RUNNING_ID" ]; then
         echo "❌ L'immagine di rollback è quella già in esecuzione: non c'è nulla da ripristinare."
         exit 1
     fi
 
     # La versione sta nel nome del tag versionato che punta alla stessa immagine.
-    PREV_VERSION=$(remote "sudo podman images --format '{{.Tag}}|{{.Id}}' localhost/home-assistant" \
+    PREV_VERSION=$(remote "svc-run homeassistant podman images --format '{{.Tag}}|{{.Id}}' localhost/home-assistant" \
         | grep "|$TARGET_ID" | grep -v '^rollback-previous' | head -1 \
         | cut -d'|' -f1 | sed 's/^rollback-//' || true)
     echo "   Immagine di rollback: $ROLLBACK_TARGET"
@@ -179,7 +181,7 @@ if [ "$DO_ROLLBACK" -eq 1 ]; then
     conferma "   Procedo con il rollback?" || { echo "Annullato."; exit 0; }
 
     echo "🔄 Ripristino immagine e riavvio..."
-    remote "sudo podman tag '$ROLLBACK_TARGET' '$IMAGE' && sudo systemctl restart homeassistant.service"
+    remote "svc-run homeassistant podman tag '$ROLLBACK_TARGET' '$IMAGE' && svc-run homeassistant systemctl --user restart homeassistant.service"
     wait_for_ha || true
     echo "✅ Rollback completato: $(remote "sudo cat $HA_VERSION_FILE")"
     echo ""
@@ -208,9 +210,9 @@ fi
 # --- 1. Pull (HA resta acceso: nessun downtime in questa fase) ---
 echo ""
 echo "--- ⬇️  Download immagine dal registry ---"
-CURRENT_IMAGE_ID=$(remote "sudo podman inspect --format '{{.Image}}' homeassistant")
-remote "sudo podman pull '$IMAGE'"
-NEW_IMAGE_ID=$(remote "sudo podman inspect --format '{{.Id}}' '$IMAGE'")
+CURRENT_IMAGE_ID=$(remote "svc-run homeassistant podman inspect --format '{{.Image}}' homeassistant")
+remote "svc-run homeassistant podman pull '$IMAGE'"
+NEW_IMAGE_ID=$(remote "svc-run homeassistant podman inspect --format '{{.Id}}' '$IMAGE'")
 
 if [ "$CURRENT_IMAGE_ID" = "$NEW_IMAGE_ID" ]; then
     echo ""
@@ -219,7 +221,7 @@ if [ "$CURRENT_IMAGE_ID" = "$NEW_IMAGE_ID" ]; then
 fi
 
 # --- 2. Che versione stiamo per installare? ---
-NEW_VERSION=$(remote "sudo podman run --rm --entrypoint '' '$IMAGE' \
+NEW_VERSION=$(remote "svc-run homeassistant podman run --rm --entrypoint '' '$IMAGE' \
     grep -E '^(MAJOR|MINOR)_VERSION|^PATCH_VERSION' /usr/src/homeassistant/homeassistant/const.py" \
     | sed -E 's/.*= *//; s/"//g' | paste -sd. -)
 
@@ -240,8 +242,8 @@ conferma "Procedo?" || {
 # --- 3. Tag di rollback sull'immagine VECCHIA (ancora presente per ID) ---
 echo ""
 echo "--- 🏷️  Tag di rollback ---"
-remote "sudo podman tag '$CURRENT_IMAGE_ID' '$ROLLBACK_PTR' \
-     && sudo podman tag '$CURRENT_IMAGE_ID' 'localhost/home-assistant:rollback-${CURRENT_VERSION}'"
+remote "svc-run homeassistant podman tag '$CURRENT_IMAGE_ID' '$ROLLBACK_PTR' \
+     && svc-run homeassistant podman tag '$CURRENT_IMAGE_ID' 'localhost/home-assistant:rollback-${CURRENT_VERSION}'"
 echo "✅ Immagine $CURRENT_VERSION conservata (--rollback per tornare indietro)"
 
 # --- 4. Backup preventivo (nativo, cifrato, con HA ancora sulla versione vecchia) ---
@@ -265,7 +267,7 @@ fi
 # --- 5. Riavvio controllato ---
 echo ""
 echo "--- 🔄 Riavvio del container ---"
-remote "sudo systemctl restart homeassistant.service"
+remote "svc-run homeassistant systemctl --user restart homeassistant.service"
 wait_for_ha || true
 
 # --- 6. Verifica ---
@@ -281,11 +283,11 @@ if [ -n "$HA_TOKEN" ]; then
     echo "   check_config: ${ESITO:-non verificabile}"
 fi
 
-ERR_COUNT=$(remote "sudo podman logs homeassistant 2>&1 | grep -ac 'ERROR' || true")
+ERR_COUNT=$(remote "svc-run homeassistant podman logs homeassistant 2>&1 | grep -ac 'ERROR' || true")
 echo "   Righe ERROR nel log di questo avvio: $ERR_COUNT"
 if [ "$ERR_COUNT" != "0" ]; then
     echo "   Ultimi errori:"
-    remote "sudo podman logs homeassistant 2>&1 | grep -a 'ERROR' | tail -5" | sed 's/^/     /'
+    remote "svc-run homeassistant podman logs homeassistant 2>&1 | grep -a 'ERROR' | tail -5" | sed 's/^/     /'
 fi
 
 echo ""

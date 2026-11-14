@@ -1,3 +1,8 @@
+# Quadlet ROOTLESS dell'utente di servizio "cloudflared" (uid 1002), senza
+# sudo e senza login. Installato in /var/home/cloudflared/.config/containers/systemd/.
+# E' il componente rivolto a internet: se venisse compromesso, uscendo dal
+# container troverebbe un utente che non puo' fare nulla, non core.
+
 [Unit]
 # Non arrendersi mai. Al boot dopo un blackout il server riparte prima di
 # modem e router: il DNS risponde SERVFAIL e cloudflared esce subito (non
@@ -16,9 +21,11 @@ AutoUpdate=registry
 # e, con Network=host, chiunque in LAN poteva leggere /config: hostname e
 # destinazione del tunnel.
 Exec=tunnel --metrics 127.0.0.1:20241 run
-# Solo cloudflared legge questo file: contiene TUNNEL_TOKEN.
-EnvironmentFile=/var/home/core/homeassistant/secrets.env
+# Contiene TUNNEL_TOKEN. Sta nella home di cloudflared con permessi 600:
+# nessun altro utente di servizio puo' leggerlo.
+EnvironmentFile=/var/home/cloudflared/secrets.env
 Network=host
+NoNewPrivileges=true
 
 [Service]
 Restart=always

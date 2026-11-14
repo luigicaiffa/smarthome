@@ -1,5 +1,16 @@
 variant: fcos
 version: 1.5.0
+
+# TRE UTENTI, TRE RUOLI
+#   core           amministrazione: SSH con chiave, sudo, deploy. Non fa girare
+#                  nessun servizio.
+#   homeassistant  solo il container di Home Assistant (rootless).
+#   cloudflared    solo il tunnel Cloudflare (rootless).
+# Gli utenti di servizio non hanno shell, chiavi SSH ne' sudo: chi uscisse da
+# un container si ritroverebbe con un utente che non puo' fare nulla.
+# Gli uid sono fissi perche' compaiono nei comandi di servizio (journalctl
+# _UID=..., /run/user/<uid>). Gli intervalli subuid/subgid per i container li
+# assegna useradd; deploy_app.sh li aggiunge se mancano.
 passwd:
   users:
     - name: core
@@ -8,102 +19,134 @@ passwd:
       groups:
         - wheel
         - sudo
+    - name: homeassistant
+      uid: 1001
+      home_dir: /var/home/homeassistant
+      shell: /usr/sbin/nologin
+    - name: cloudflared
+      uid: 1002
+      home_dir: /var/home/cloudflared
+      shell: /usr/sbin/nologin
 
 storage:
   directories:
-    # Cartella principale Home Assistant e Configurazione
-    - path: /var/home/core/homeassistant
-      mode: 0755
+    # --- homeassistant ---
+    - path: /var/home/homeassistant/config
+      mode: 0750
       user:
-        name: core
+        name: homeassistant
       group:
-        name: core
-    - path: /var/home/core/homeassistant/config
-      mode: 0755
+        name: homeassistant
+    - path: /var/home/homeassistant/.config
+      mode: 0700
       user:
-        name: core
+        name: homeassistant
       group:
-        name: core
-    # Catena directory per i Quadlet ROOTLESS (utente core).
-    # Necessaria affinche' cloudflared parta come servizio utente al boot.
-    - path: /var/home/core/.config
-      mode: 0755
+        name: homeassistant
+    - path: /var/home/homeassistant/.config/containers
+      mode: 0700
       user:
-        name: core
+        name: homeassistant
       group:
-        name: core
-    - path: /var/home/core/.config/containers
-      mode: 0755
+        name: homeassistant
+    - path: /var/home/homeassistant/.config/containers/systemd
+      mode: 0700
       user:
-        name: core
+        name: homeassistant
       group:
-        name: core
-    - path: /var/home/core/.config/containers/systemd
-      mode: 0755
+        name: homeassistant
+
+    # --- cloudflared ---
+    - path: /var/home/cloudflared/.config
+      mode: 0700
       user:
-        name: core
+        name: cloudflared
       group:
-        name: core
-    # Catena directory per le unit systemd dell'utente core
-    # (timer notturno di podman-auto-update per cloudflared).
-    - path: /var/home/core/.config/systemd
-      mode: 0755
+        name: cloudflared
+    - path: /var/home/cloudflared/.config/containers
+      mode: 0700
       user:
-        name: core
+        name: cloudflared
       group:
-        name: core
-    - path: /var/home/core/.config/systemd/user
-      mode: 0755
+        name: cloudflared
+    - path: /var/home/cloudflared/.config/containers/systemd
+      mode: 0700
       user:
-        name: core
+        name: cloudflared
       group:
-        name: core
-    - path: /var/home/core/.config/systemd/user/podman-auto-update.timer.d
-      mode: 0755
+        name: cloudflared
+    # Unit utente: timer notturno di podman-auto-update (solo cloudflared).
+    - path: /var/home/cloudflared/.config/systemd
+      mode: 0700
       user:
-        name: core
+        name: cloudflared
       group:
-        name: core
-    - path: /var/home/core/.config/systemd/user/timers.target.wants
-      mode: 0755
+        name: cloudflared
+    - path: /var/home/cloudflared/.config/systemd/user
+      mode: 0700
       user:
-        name: core
+        name: cloudflared
       group:
-        name: core
+        name: cloudflared
+    - path: /var/home/cloudflared/.config/systemd/user/podman-auto-update.timer.d
+      mode: 0700
+      user:
+        name: cloudflared
+      group:
+        name: cloudflared
+    - path: /var/home/cloudflared/.config/systemd/user/timers.target.wants
+      mode: 0700
+      user:
+        name: cloudflared
+      group:
+        name: cloudflared
 
   links:
-    # Equivale a 'systemctl --user enable podman-auto-update.timer':
-    # systemd.units di Ignition gestisce solo le unit di sistema.
-    - path: /var/home/core/.config/systemd/user/timers.target.wants/podman-auto-update.timer
+    # Equivale a 'systemctl --user enable podman-auto-update.timer' per
+    # cloudflared: systemd.units di Ignition gestisce solo le unit di sistema.
+    # Home Assistant non ha il timer: si aggiorna a mano con update_ha.sh.
+    - path: /var/home/cloudflared/.config/systemd/user/timers.target.wants/podman-auto-update.timer
       target: /usr/lib/systemd/user/podman-auto-update.timer
       user:
-        name: core
+        name: cloudflared
       group:
-        name: core
+        name: cloudflared
 
   files:
-    # Abilita il Linger
-    - path: /var/lib/systemd/linger/core
+    # Linger: le istanze systemd degli utenti di servizio partono al boot,
+    # senza login, e con loro i container.
+    - path: /var/lib/systemd/linger/homeassistant
       mode: 0644
       contents:
         inline: ""
-    
+    - path: /var/lib/systemd/linger/cloudflared
+      mode: 0644
+      contents:
+        inline: ""
+
     # Permette ai container rootless di usare porte >= 80
     - path: /etc/sysctl.d/99-unprivileged-ports.conf
       mode: 0644
       contents:
         inline: "net.ipv4.ip_unprivileged_port_start=80"
 
+    # Comando per agire come utente di servizio (vedi il commento nel file).
+    # /usr/local su FCOS e' un collegamento a /var/usrlocal, l'unica parte
+    # scrivibile di /usr.
+    - path: /var/usrlocal/bin/svc-run
+      mode: 0755
+      contents:
+        local: services/svc-run
+
     # --- SEGRETI DI CLOUDFLARED ---
-    # Letto SOLO da cloudflared (rootless, utente core) via EnvironmentFile.
-    # Home Assistant non lo riceve: il fuso orario glielo da' il suo .container.
-    # Placeholder iniziale: verra' sovrascritto da push_update.sh con i valori reali.
-    - path: /var/home/core/homeassistant/secrets.env
+    # Solo cloudflared lo legge, via EnvironmentFile. Placeholder iniziale:
+    # push_update.sh lo sostituisce con il token reale.
+    - path: /var/home/cloudflared/secrets.env
       mode: 0600
       user:
-        name: core
+        name: cloudflared
       group:
-        name: core
+        name: cloudflared
       contents:
         inline: |
           TUNNEL_TOKEN=inserisci_qui_il_tuo_token_cloudflare_reale
@@ -120,50 +163,44 @@ storage:
       contents:
         local: services/sshd-hardening.conf
 
-    # --- INIEZIONE DEI SERVIZI DA GIT ---
-    - path: /etc/systemd/system/install-bluez.service
-      mode: 0644
-      contents:
-        local: services/install-bluez.service
-
-    - path: /etc/containers/systemd/homeassistant.container
-      mode: 0644
-      contents:
-        local: services/homeassistant.container
-
     # Riavvii di Zincati solo nella finestra notturna (default: immediati).
     - path: /etc/zincati/config.d/55-updates-strategy.toml
       mode: 0644
       contents:
         local: services/zincati-updates-strategy.toml
 
-    # cloudflared e' ROOTLESS: va nella cartella Quadlet dell'utente core,
-    # non in /etc/containers/systemd (che e' per i servizi di sistema/root).
-    # Con il linger attivo, l'istanza systemd di 'core' parte al boot e lo avvia.
-    - path: /var/home/core/.config/containers/systemd/cloudflared.container
+    # --- QUADLET ROOTLESS ---
+    # Ognuno nella cartella Quadlet del proprio utente: con il linger,
+    # l'istanza systemd dell'utente parte al boot e avvia il container.
+    - path: /var/home/homeassistant/.config/containers/systemd/homeassistant.container
       mode: 0644
       user:
-        name: core
+        name: homeassistant
       group:
-        name: core
+        name: homeassistant
+      contents:
+        local: services/homeassistant.container
+
+    - path: /var/home/cloudflared/.config/containers/systemd/cloudflared.container
+      mode: 0644
+      user:
+        name: cloudflared
+      group:
+        name: cloudflared
       contents:
         local: services/cloudflared.container
 
-    # Auto-update notturno di cloudflared (timer utente, solo container rootless).
-    - path: /var/home/core/.config/systemd/user/podman-auto-update.timer.d/nightly.conf
+    # Auto-update notturno di cloudflared (timer utente).
+    - path: /var/home/cloudflared/.config/systemd/user/podman-auto-update.timer.d/nightly.conf
       mode: 0644
       user:
-        name: core
+        name: cloudflared
       group:
-        name: core
+        name: cloudflared
       contents:
         local: services/podman-auto-update-nightly.conf
 
 systemd:
   units:
     - name: zincati.service
-      enabled: true
-    - name: bluetooth.service
-      enabled: true
-    - name: install-bluez.service
       enabled: true

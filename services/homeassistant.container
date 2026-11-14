@@ -1,32 +1,44 @@
+# Quadlet ROOTLESS dell'utente di servizio "homeassistant" (uid 1001).
+# Installato in /var/home/homeassistant/.config/containers/systemd/.
+#
+# PERCHE' ROOTLESS E CON UN UTENTE SUO
+# Fino a novembre 2026 HA girava come root con SELinux disattivato
+# (SecurityLabelDisable) e le capability NET_ADMIN/NET_RAW, tutto per il
+# Bluetooth, che non era usato. Il processo aveva l'etichetta spc_t: un'integrazione
+# compromessa era di fatto root sull'host.
+# Ora gira:
+#  - rootless: root nel container e' l'utente homeassistant sull'host;
+#  - con un utente dedicato, senza sudo e senza login: chi uscisse dal
+#    container non trova i privilegi di core (che ha sudo senza password);
+#  - confinato da SELinux con l'etichetta standard container_t;
+#  - senza capability aggiuntive e senza D-Bus di sistema.
+# Se un giorno servisse il Bluetooth, la strada e' un proxy Bluetooth ESPHome
+# in rete, non riaprire questi permessi.
+
 [Unit]
-Description=Home Assistant (Rootful System Container)
-After=network-online.target bluetooth.service
-Wants=bluetooth.service
+Description=Home Assistant (rootless, utente homeassistant)
 
 [Container]
 Image=ghcr.io/home-assistant/home-assistant:stable
 ContainerName=homeassistant
-AutoUpdate=registry
+# Niente AutoUpdate: HA si aggiorna solo a mano con scripts/update_ha.sh.
 
-# Disabilita l'isolamento SELinux per comunicare con l'hardware host
-SecurityLabelDisable=true
-
-# --- NUOVI PERMESSI BLUETOOTH ATTIVO ---
-# Richiesti da HA per inviare comandi (es. lampadine SmartLife/Tuya)
-AddCapability=NET_ADMIN
-AddCapability=NET_RAW
-
-# Niente EnvironmentFile: secrets.env contiene il TUNNEL_TOKEN di cloudflared,
-# e passarlo ad HA lo rendeva leggibile da qualunque integrazione (HACS
-# compresa) tramite le variabili d'ambiente. Ad HA serve solo il fuso orario,
-# che non e' un segreto.
+# Ad HA serve solo il fuso orario, che non e' un segreto. Nessun
+# EnvironmentFile: il token del tunnel sta nella home di cloudflared, che
+# questo utente non puo' leggere.
 Environment=TZ=Europe/Rome
+
+# Rete dell'host: serve alla scoperta di Chromecast, TV e Shelly (mDNS, SSDP).
+# Le porte sotto la 1024 sono permesse ai rootless da 80 in su
+# (net.ipv4.ip_unprivileged_port_start). Senza NET_RAW HA non puo' leggere il
+# traffico altrui: perde solo la scoperta via DHCP, che non serve.
 Network=host
 
-# Volumi
-Volume=/var/home/core/homeassistant/config:/config:Z
-Volume=/run/dbus:/run/dbus:ro
-Volume=/etc/machine-id:/etc/machine-id:ro
+# Nessun processo nel container puo' acquisire privilegi nuovi (setuid ecc.).
+NoNewPrivileges=true
+
+# :Z rietichetta la cartella per questo solo container a ogni avvio.
+Volume=/var/home/homeassistant/config:/config:Z
 
 # Tempo concesso ad HA per chiudersi da solo (recorder, integrazioni) prima del
 # SIGKILL. Il default di podman e' 10s, troppo poco: HA veniva sempre ucciso a
@@ -34,12 +46,12 @@ Volume=/etc/machine-id:/etc/machine-id:ro
 StopTimeout=60
 
 [Service]
-# Al boot dopo un blackout il server riparte prima del router:
-# network-online.target arriva quando il cavo non ha ancora un indirizzo e HA
-# partirebbe senza IPv4. Zeroconf, ssdp, cloud, cast e notify falliscono il
-# setup con "Errno 19 No such device" e non riprovano piu': HA resta a meta'
-# fino a un riavvio manuale (successo il 7/11, il lease e' arrivato 84 secondi
-# dopo l'avvio di HA).
+# Al boot dopo un blackout il server riparte prima del router: HA partirebbe
+# senza IPv4. Zeroconf, ssdp, cloud, cast e notify falliscono il setup con
+# "Errno 19 No such device" e non riprovano piu': HA resta a meta' fino a un
+# riavvio manuale (successo il 7/11, il lease e' arrivato 84 secondi dopo
+# l'avvio di HA). Un servizio utente non puo' nemmeno aspettare
+# network-online.target, che e' del gestore di sistema.
 # Si aspetta la default route, cioe' il lease DHCP, e non internet: le
 # integrazioni cloud riprovano da sole quando torna il modem. Dopo 5 minuti si
 # parte comunque, meglio HA a meta' che HA spento. In condizioni normali il
@@ -50,7 +62,9 @@ ExecStartPre=/bin/sh -c 'for i in $$(seq 1 150); do ip -4 route show default | g
 TimeoutStartSec=600
 # Deve superare StopTimeout, altrimenti systemd uccide il container per primo.
 TimeoutStopSec=90
+Restart=on-failure
+RestartSec=30
 
 [Install]
-# I servizi di sistema usano multi-user.target (non default.target)
-WantedBy=multi-user.target
+# I servizi utente usano default.target; il linger li fa partire al boot.
+WantedBy=default.target

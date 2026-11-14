@@ -1,0 +1,37 @@
+#!/bin/bash
+# svc-run <utente> <comando> [argomenti...]
+#
+# Esegue un comando come utente di servizio, con l'ambiente che serve a
+# podman e a systemctl --user: XDG_RUNTIME_DIR punta alla sessione systemd
+# dell'utente, tenuta in vita dal linger. Lo usa core (via sudo) e lo usano
+# gli script del repo da remoto. Installato in /usr/local/bin/svc-run.
+#
+# Esempi:
+#   svc-run homeassistant systemctl --user restart homeassistant.service
+#   svc-run homeassistant podman exec -it homeassistant bash
+#   svc-run homeassistant podman logs -f homeassistant
+#   svc-run cloudflared systemctl --user status cloudflared.service
+#
+# I log si leggono anche senza svc-run (core e' nel gruppo systemd-journal):
+#   journalctl _UID=1001 --user-unit homeassistant.service -f
+#   journalctl _UID=1002 --user-unit cloudflared.service -f
+set -euo pipefail
+
+case "${1:-}" in
+    homeassistant|cloudflared) ;;
+    *)
+        echo "uso: svc-run homeassistant|cloudflared <comando> [argomenti...]" >&2
+        exit 2
+        ;;
+esac
+
+utente="$1"
+shift
+uid="$(id -u "$utente")"
+
+# La cartella corrente di core non e' leggibile dall'utente di servizio.
+cd /
+exec sudo -u "$utente" env \
+    XDG_RUNTIME_DIR="/run/user/$uid" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+    "$@"
