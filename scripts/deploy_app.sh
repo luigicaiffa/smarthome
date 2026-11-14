@@ -112,24 +112,13 @@ echo "▶️  Riavvio servizi..."
 systemctl --user restart cloudflared.service || true
 sudo systemctl restart homeassistant.service || true
 
-# 5.1 Auto-Installazione HACS (Se mancante)
-echo "🔍 Controllo presenza HACS..."
-
-HACS_DIR="$HA_DIR/config/custom_components/hacs"
-sleep 10
-
-if [ ! -d "$HACS_DIR" ]; then
-    echo "⚠️  HACS non trovato. Avvio installazione automatica..."
-    if sudo podman exec -it homeassistant bash -c "wget -O - https://get.hacs.xyz | bash"; then
-        echo "✅ HACS installato con successo!"
-        echo "♻️  Riavvio Home Assistant per attivarlo..."
-        sudo systemctl restart homeassistant.service
-    else
-        echo "❌ Errore durante l'installazione di HACS."
-    fi
-else
-    echo "✅ HACS è già presente."
-fi
+# 5.1 Niente installazione automatica di HACS.
+# Qui c'era un "wget -O - https://get.hacs.xyz | bash" eseguito dentro il
+# container ad ogni deploy: codice scaricato ed eseguito senza controllo, che
+# installava a sua volta un componente capace di aggiornare codice di terzi.
+# Le integrazioni custom e le card si aggiornano a mano, scegliendo quando e
+# guardando cosa cambia. Se un giorno servisse HACS, va installato a mano seguendo
+# la sua documentazione.
 
 # 6. Check Status
 echo ""
